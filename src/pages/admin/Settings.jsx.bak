@@ -1,0 +1,1082 @@
+import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import AdminLayout from '../../components/layout/AdminLayout'
+import { Users, Loader2, Pencil, Save, X, RefreshCw, Trash2, Plus, Building2 } from 'lucide-react'
+
+// Configuration
+const CONFIG = {
+    APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbyGf3LdYk6MPiOs_shPU9_AW7wmRjJZ4QxMk9qYqTScsDMB7IliaWRB1HueYy7w5qxqNw/exec",
+    SHEET_NAME: "Whatsapp",
+}
+
+function Settings() {
+    const navigate = useNavigate()
+    const [data, setData] = useState([])
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState(null)
+    const [editingId, setEditingId] = useState(null)
+    const [editedValues, setEditedValues] = useState({ doerName: '', password: '' })
+    const [saving, setSaving] = useState(false)
+    const [successMessage, setSuccessMessage] = useState('')
+    const [deleting, setDeleting] = useState(null)
+    const [authorized, setAuthorized] = useState(false)
+    const [showAddModal, setShowAddModal] = useState(false)
+    const [newEntry, setNewEntry] = useState({ doerName: '', password: '', role: '', idEmail: '', number: '' })
+    const [adding, setAdding] = useState(false)
+    const [activeTab, setActiveTab] = useState('users') // 'users' or 'department'
+    const [departmentData, setDepartmentData] = useState([])
+    const [showDeptModal, setShowDeptModal] = useState(false)
+    const [newDeptEntry, setNewDeptEntry] = useState({ department: '', givenBy: '' })
+    const [addingDept, setAddingDept] = useState(false)
+    const [editingDeptId, setEditingDeptId] = useState(null)
+    const [editedDeptValues, setEditedDeptValues] = useState({ department: '', givenBy: '' })
+    const [savingDept, setSavingDept] = useState(false)
+
+    // Check if user is super_admin on mount
+    useEffect(() => {
+        const userRole = sessionStorage.getItem('role') || ''
+        const normalizedRole = userRole.toLowerCase().trim().replace(/\s+/g, '_')
+
+        // Only allow super_admin or superadmin
+        if (normalizedRole === 'super_admin' || normalizedRole === 'superadmin') {
+            setAuthorized(true)
+            fetchWhatsappData()
+        } else {
+            // Redirect unauthorized users to dashboard without showing error
+            navigate('/dashboard/admin', { replace: true })
+        }
+    }, [navigate])
+
+    const fetchWhatsappData = async () => {
+        try {
+            setLoading(true)
+            setError(null)
+
+            const response = await fetch(
+                `${CONFIG.APPS_SCRIPT_URL}?sheet=${CONFIG.SHEET_NAME}&action=fetch`
+            )
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch data: ${response.status}`)
+            }
+
+            const responseText = await response.text()
+            let parsedData
+
+            try {
+                parsedData = JSON.parse(responseText)
+            } catch (parseError) {
+                const jsonStart = responseText.indexOf("{")
+                const jsonEnd = responseText.lastIndexOf("}")
+                if (jsonStart !== -1 && jsonEnd !== -1) {
+                    const jsonString = responseText.substring(jsonStart, jsonEnd + 1)
+                    parsedData = JSON.parse(jsonString)
+                } else {
+                    throw new Error("Invalid JSON response from server")
+                }
+            }
+
+            // Process the data to extract columns D (index 3) and E (index 4)
+            let rows = []
+
+            if (parsedData.table && parsedData.table.rows) {
+                rows = parsedData.table.rows
+            } else if (Array.isArray(parsedData)) {
+                rows = parsedData
+            } else if (parsedData.values) {
+                rows = parsedData.values.map((row) => ({
+                    c: row.map((val) => ({ v: val })),
+                }))
+            }
+
+            // Extract data starting from row 2 (skip header row)
+            const extractedData = rows
+                .slice(1) // Skip header row
+                .map((row, index) => {
+                    let rowValues = []
+                    if (row.c) {
+                        rowValues = row.c.map((cell) =>
+                            cell && cell.v !== undefined ? cell.v : ""
+                        )
+                    } else if (Array.isArray(row)) {
+                        rowValues = row
+                    }
+
+                    // Column A=index 0, B=index 1, D=index 3, E=index 4, F=index 5, G=index 6, H=index 7
+                    const department = rowValues[0] || ""
+                    const givenBy = rowValues[1] || ""
+                    const doerName = rowValues[3] || ""
+                    const password = rowValues[4] || ""
+                    const role = rowValues[5] || ""
+                    const idEmail = rowValues[6] || ""
+                    const number = rowValues[7] || ""
+
+                    // Only include rows that have at least one of the values
+                    if (doerName || password || department || givenBy) {
+                        return {
+                            id: index,
+                            _rowIndex: index + 2, // Sheet row (1-indexed + skip header)
+                            department: department.toString().trim(),
+                            givenBy: givenBy.toString().trim(),
+                            doerName: doerName.toString().trim(),
+                            password: password.toString().trim(),
+                            role: role.toString().trim(),
+                            idEmail: idEmail.toString().trim(),
+                            number: number.toString().trim(),
+                            // Store all original row values for update
+                            _originalRow: rowValues
+                        }
+                    }
+                    return null
+                })
+                .filter(Boolean)
+
+            setData(extractedData)
+        } catch (err) {
+            console.error("Error fetching Whatsapp data:", err)
+            setError(err.message)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const handleEditClick = (row) => {
+        setEditingId(row.id)
+        setEditedValues({
+            doerName: row.doerName,
+            password: row.password,
+            role: row.role,
+            idEmail: row.idEmail,
+            number: row.number
+        })
+    }
+
+    const handleCancelEdit = () => {
+        setEditingId(null)
+        setEditedValues({ doerName: '', password: '', role: '', idEmail: '', number: '' })
+    }
+
+    const handleSaveEdit = async (row) => {
+        if (saving) return
+
+        try {
+            setSaving(true)
+            setSuccessMessage('')
+
+            // Build the row data array - update only columns D (index 3) and E (index 4)
+            // Backend expects rowData as array where index matches column
+            const originalRow = row._originalRow || []
+            const rowData = [...originalRow]
+
+            // Update columns D, E, F, G, H
+            rowData[3] = editedValues.doerName // Column D
+            rowData[4] = editedValues.password // Column E
+            rowData[5] = editedValues.role // Column F
+            rowData[6] = editedValues.idEmail // Column G
+            rowData[7] = editedValues.number // Column H
+
+            console.log("Updating row:", {
+                rowIndex: row._rowIndex,
+                rowData: rowData
+            })
+
+            const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    sheetName: CONFIG.SHEET_NAME,
+                    action: 'update',
+                    rowIndex: String(row._rowIndex),
+                    rowData: JSON.stringify(rowData)
+                })
+            })
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`)
+            }
+
+            const result = await response.json()
+            console.log("Update result:", result)
+
+            if (result.success) {
+                // Update local state
+                setData(prev => prev.map(item =>
+                    item.id === row.id
+                        ? {
+                            ...item,
+                            doerName: editedValues.doerName,
+                            password: editedValues.password,
+                            role: editedValues.role,
+                            idEmail: editedValues.idEmail,
+                            number: editedValues.number,
+                            _originalRow: rowData
+                        }
+                        : item
+                ))
+                setEditingId(null)
+                setEditedValues({ doerName: '', password: '', role: '', idEmail: '', number: '' })
+                setSuccessMessage('Updated successfully!')
+
+                // Clear success message after 3 seconds
+                setTimeout(() => setSuccessMessage(''), 3000)
+            } else {
+                throw new Error(result.error || 'Failed to update')
+            }
+        } catch (err) {
+            console.error("Error updating data:", err)
+            alert(`Error: ${err.message}`)
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    const handleDeleteRow = async (row) => {
+        // confirmation dialog
+        if (!confirm(`are you sure you want to delete this enter?\n\nDoer's Name: ${row.doerName}\nPassword: ${row.password}`)) {
+            return
+        }
+        try {
+            setDeleting(row.id)
+            const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    action: 'deleteRow',
+                    sheet: CONFIG.SHEET_NAME,
+                    rowIndex: String(row._rowIndex)
+                })
+            })
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`)
+            }
+            const result = await response.json()
+            console.log("Delete result:", result)
+
+            if (result.success) {
+                // Refresh data after delete
+                await fetchWhatsappData()
+                setSuccessMessage('Deleted successfully!')
+                setTimeout(() => setSuccessMessage(''), 3000)
+            } else {
+                throw new Error(result.error || 'failed to delete')
+            }
+        } catch (err) {
+            console.error("Error deleting row:", err)
+            alert(`Error: ${err.message}`)
+        } finally {
+            setDeleting(null)
+        }
+    }
+
+    // Add new entry function
+    const handleAddNewEntry = async () => {
+        if (adding) return
+
+        // Validate required fields
+        if (!newEntry.doerName.trim()) {
+            alert('Doer\'s Name is required')
+            return
+        }
+
+        try {
+            setAdding(true)
+
+            // Find the last row with user data (column D - doerName) to insert after it
+            // Filter rows that have doerName (column D data) and find the max _rowIndex
+            const usersWithData = data.filter(row => row.doerName && row.doerName.trim() !== '')
+            const lastUserRowIndex = usersWithData.length > 0
+                ? Math.max(...usersWithData.map(row => row._rowIndex))
+                : 1 // If no users, start from row 2 (after header)
+
+            const nextRowIndex = lastUserRowIndex + 1
+
+            // Build row data array for columns A through H
+            // A=blank, B=blank, C=blank, D=doerName, E=password, F=role, G=idEmail, H=number
+            const rowData = [
+                '', // Column A
+                '', // Column B
+                '', // Column C
+                newEntry.doerName, // Column D
+                newEntry.password, // Column E
+                newEntry.role, // Column F
+                newEntry.idEmail, // Column G
+                newEntry.number // Column H
+            ]
+
+            console.log("Adding new entry at row:", nextRowIndex, rowData)
+
+            // Use 'update' action with specific rowIndex to insert at the correct position
+            const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    sheetName: CONFIG.SHEET_NAME,
+                    action: 'update',
+                    rowIndex: String(nextRowIndex),
+                    rowData: JSON.stringify(rowData)
+                })
+            })
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`)
+            }
+
+            const result = await response.json()
+            console.log("Add result:", result)
+
+            if (result.success) {
+                // Reset form and close modal
+                setNewEntry({ doerName: '', password: '', role: '', idEmail: '', number: '' })
+                setShowAddModal(false)
+                setSuccessMessage('New user added successfully!')
+                setTimeout(() => setSuccessMessage(''), 3000)
+
+                // Refresh data
+                await fetchWhatsappData()
+            } else {
+                throw new Error(result.error || 'Failed to add new entry')
+            }
+        } catch (err) {
+            console.error("Error adding new entry:", err)
+            alert(`Error: ${err.message}`)
+        } finally {
+            setAdding(false)
+        }
+    }
+
+    // Add new department function
+    const handleAddDepartment = async () => {
+        if (addingDept) return
+
+        // Validate required fields
+        if (!newDeptEntry.department.trim()) {
+            alert('Department is required')
+            return
+        }
+
+        try {
+            setAddingDept(true)
+
+            // Find the last row with department data (column A) to insert after it
+            // Filter rows that have department (column A data) and find the max _rowIndex
+            const deptsWithData = data.filter(row => row.department && row.department.trim() !== '')
+            const lastDeptRowIndex = deptsWithData.length > 0
+                ? Math.max(...deptsWithData.map(row => row._rowIndex))
+                : 1 // If no departments, start from row 2 (after header)
+
+            const nextRowIndex = lastDeptRowIndex + 1
+
+            // Build row data array for columns A and B only
+            const rowData = [
+                newDeptEntry.department, // Column A
+                newDeptEntry.givenBy, // Column B
+                '', // Column C
+                '', // Column D
+                '', // Column E
+                '', // Column F
+                '', // Column G
+                '' // Column H
+            ]
+
+            console.log("Adding new department at row:", nextRowIndex, rowData)
+
+            // Use 'update' action with specific rowIndex to insert at the correct position
+            const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    sheetName: CONFIG.SHEET_NAME,
+                    action: 'update',
+                    rowIndex: String(nextRowIndex),
+                    rowData: JSON.stringify(rowData)
+                })
+            })
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`)
+            }
+
+            const result = await response.json()
+            console.log("Add department result:", result)
+
+            if (result.success) {
+                setNewDeptEntry({ department: '', givenBy: '' })
+                setShowDeptModal(false)
+                setSuccessMessage('New department added successfully!')
+                setTimeout(() => setSuccessMessage(''), 3000)
+
+                await fetchWhatsappData()
+            } else {
+                throw new Error(result.error || 'Failed to add department')
+            }
+        } catch (err) {
+            console.error("Error adding department:", err)
+            alert(`Error: ${err.message}`)
+        } finally {
+            setAddingDept(false)
+        }
+    }
+
+    // Department edit functions
+    const handleDeptEditClick = (row) => {
+        setEditingDeptId(row.id)
+        setEditedDeptValues({
+            department: row.department,
+            givenBy: row.givenBy
+        })
+    }
+
+    const handleCancelDeptEdit = () => {
+        setEditingDeptId(null)
+        setEditedDeptValues({ department: '', givenBy: '' })
+    }
+
+    const handleSaveDeptEdit = async (row) => {
+        if (savingDept) return
+
+        try {
+            setSavingDept(true)
+
+            // Build the row data array - update columns A and B
+            const originalRow = row._originalRow || []
+            const rowData = [...originalRow]
+
+            // Update columns A and B
+            rowData[0] = editedDeptValues.department // Column A
+            rowData[1] = editedDeptValues.givenBy // Column B
+
+            console.log("Updating department row:", {
+                rowIndex: row._rowIndex,
+                rowData: rowData
+            })
+
+            const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    sheetName: CONFIG.SHEET_NAME,
+                    action: 'update',
+                    rowIndex: String(row._rowIndex),
+                    rowData: JSON.stringify(rowData)
+                })
+            })
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`)
+            }
+
+            const result = await response.json()
+            console.log("Department update result:", result)
+
+            if (result.success) {
+                // Update local state
+                setData(prev => prev.map(item =>
+                    item.id === row.id
+                        ? {
+                            ...item,
+                            department: editedDeptValues.department,
+                            givenBy: editedDeptValues.givenBy,
+                            _originalRow: rowData
+                        }
+                        : item
+                ))
+                setEditingDeptId(null)
+                setEditedDeptValues({ department: '', givenBy: '' })
+                setSuccessMessage('Department updated successfully!')
+                setTimeout(() => setSuccessMessage(''), 3000)
+            } else {
+                throw new Error(result.error || 'Failed to update department')
+            }
+        } catch (err) {
+            console.error("Error updating department:", err)
+            alert(`Error: ${err.message}`)
+        } finally {
+            setSavingDept(false)
+        }
+    }
+
+
+
+    // Don't render anything if not authorized (will redirect)
+    if (!authorized) {
+        return null
+    }
+
+    return (
+        <AdminLayout>
+            <div className="w-full mx-auto">
+                {/* Header */}
+                <div className="mb-8">
+                    <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg">
+                                <Users className="h-6 w-6 text-white" />
+                            </div>
+                            <h1 className="text-2xl font-bold text-gray-800">Settings</h1>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => activeTab === 'users' ? setShowAddModal(true) : setShowDeptModal(true)}
+                                className="flex items-center gap-2 px-4 py-2 text-sm bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white rounded-lg transition-colors"
+                            >
+                                <Plus className="h-4 w-4" />
+                                Add New
+                            </button>
+                            <button
+                                onClick={fetchWhatsappData}
+                                disabled={loading}
+                                className="flex items-center gap-2 px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <p className="text-gray-600">Whatsapp user directory - Click edit to modify entries</p>
+                </div>
+
+                {/* Success Message */}
+                {successMessage && (
+                    <div className="mb-4 p-3 bg-green-100 border border-green-300 text-green-700 rounded-lg text-sm">
+                        {successMessage}
+                    </div>
+                )}
+
+                {/* Tabs */}
+                <div className="mb-4 flex gap-2">
+                    <button
+                        onClick={() => setActiveTab('users')}
+                        className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${activeTab === 'users'
+                            ? 'bg-gradient-to-r from-blue-500 to-purple-500 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                    >
+                        <Users className="h-4 w-4" />
+                        Users
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('department')}
+                        className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${activeTab === 'department'
+                            ? 'bg-gradient-to-r from-blue-500 to-purple-500 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                    >
+                        <Building2 className="h-4 w-4" />
+                        Department
+                    </button>
+                </div>
+
+                {/* Table Container */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    {loading ? (
+                        <div className="flex items-center justify-center py-16">
+                            <Loader2 className="h-8 w-8 text-blue-500 animate-spin" />
+                            <span className="ml-3 text-gray-600">Loading data...</span>
+                        </div>
+                    ) : error ? (
+                        <div className="flex flex-col items-center justify-center py-16">
+                            <div className="text-red-500 mb-4">
+                                <svg className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                            </div>
+                            <p className="text-red-600 font-medium">Error loading data</p>
+                            <p className="text-gray-500 text-sm mt-1">{error}</p>
+                            <button
+                                onClick={fetchWhatsappData}
+                                className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                            >
+                                Retry
+                            </button>
+                        </div>
+                    ) : data.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-16">
+                            <Users className="h-12 w-12 text-gray-300 mb-4" />
+                            <p className="text-gray-500">No data found</p>
+                        </div>
+                    ) : activeTab === 'users' ? (
+                        <table className="w-full">
+                            <thead>
+                                <tr className="bg-gradient-to-r from-blue-50 to-purple-50 border-b border-gray-200">
+                                    <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">
+                                        #
+                                    </th>
+                                    <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">
+                                        Doer's Name
+                                    </th>
+                                    <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">
+                                        Password
+                                    </th>
+                                    <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">
+                                        Role
+                                    </th>
+                                    <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">
+                                        ID
+                                    </th>
+                                    <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">
+                                        Number
+                                    </th>
+                                    <th className="px-4 py-4 text-center text-sm font-semibold text-gray-700">
+                                        Actions
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {data.map((row, index) => (
+                                    <tr
+                                        key={row.id}
+                                        className={`hover:bg-gray-50 transition-colors ${editingId === row.id ? 'bg-blue-50' : ''}`}
+                                    >
+                                        <td className="px-4 py-4 text-sm text-gray-500">
+                                            {index + 1}
+                                        </td>
+                                        <td className="px-4 py-4">
+                                            {editingId === row.id ? (
+                                                <input
+                                                    type="text"
+                                                    value={editedValues.doerName}
+                                                    onChange={(e) => setEditedValues(prev => ({ ...prev, doerName: e.target.value }))}
+                                                    className="w-full px-2 py-2 border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                                    placeholder="Enter name"
+                                                />
+                                            ) : (
+                                                <span className="text-sm text-gray-800 font-medium">
+                                                    {row.doerName || "-"}
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-4">
+                                            {editingId === row.id ? (
+                                                <input
+                                                    type="text"
+                                                    value={editedValues.password}
+                                                    onChange={(e) => setEditedValues(prev => ({ ...prev, password: e.target.value }))}
+                                                    className="w-full px-3 py-2 border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono"
+                                                    placeholder="Enter password"
+                                                />
+                                            ) : (
+                                                <span className="text-sm text-gray-600 font-mono">
+                                                    {row.password || "-"}
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-4">
+                                            {editingId === row.id ? (
+                                                <input
+                                                    type="text"
+                                                    value={editedValues.role}
+                                                    onChange={(e) => setEditedValues(prev => ({ ...prev, role: e.target.value }))}
+                                                    className="w-full px-2 py-2 border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                                    placeholder="Role"
+                                                />
+                                            ) : (
+                                                <span className="text-sm text-gray-600">
+                                                    {row.role || "-"}
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-4">
+                                            {editingId === row.id ? (
+                                                <input
+                                                    type="text"
+                                                    value={editedValues.idEmail}
+                                                    onChange={(e) => setEditedValues(prev => ({ ...prev, idEmail: e.target.value }))}
+                                                    className="w-full px-2 py-2 border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                                    placeholder="ID/Email"
+                                                />
+                                            ) : (
+                                                <span className="text-sm text-gray-600">
+                                                    {row.idEmail || "-"}
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-4">
+                                            {editingId === row.id ? (
+                                                <input
+                                                    type="text"
+                                                    value={editedValues.number}
+                                                    onChange={(e) => setEditedValues(prev => ({ ...prev, number: e.target.value }))}
+                                                    className="w-full px-2 py-2 border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                                    placeholder="Number"
+                                                />
+                                            ) : (
+                                                <span className="text-sm text-gray-600">
+                                                    {row.number || "-"}
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-4 text-center">
+                                            {editingId === row.id ? (
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <button
+                                                        onClick={() => handleSaveEdit(row)}
+                                                        disabled={saving}
+                                                        className="p-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors disabled:opacity-50"
+                                                        title="Save"
+                                                    >
+                                                        {saving ? (
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                        ) : (
+                                                            <Save className="h-4 w-4" />
+                                                        )}
+                                                    </button>
+                                                    <button
+                                                        onClick={handleCancelEdit}
+                                                        disabled={saving}
+                                                        className="p-2 bg-gray-400 text-white rounded-md hover:bg-gray-500 transition-colors disabled:opacity-50"
+                                                        title="Cancel"
+                                                    >
+                                                        <X className="h-4 w-4" />
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <button
+                                                        onClick={() => handleEditClick(row)}
+                                                        className="p-2 text-blue-600 hover:bg-blue-100 rounded-md transition-colors"
+                                                        title="Edit"
+                                                    >
+                                                        <Pencil className="h-4 w-4" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeleteRow(row)}
+                                                        disabled={deleting === row.id}
+                                                        className="p-2 text-red-600 hover:bg-red-100 rounded-md transition-colors disabled:opacity-50"
+                                                        title="Delete"
+                                                    >
+                                                        {deleting === row.id ? (
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                        ) : (
+                                                            <Trash2 className="h-4 w-4" />
+                                                        )}
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    ) : (
+                        /* Department Table */
+                        <table className="w-full">
+                            <thead>
+                                <tr className="bg-gradient-to-r from-blue-50 to-purple-50 border-b border-gray-200">
+                                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                                        #
+                                    </th>
+                                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                                        Department
+                                    </th>
+                                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                                        Given By
+                                    </th>
+                                    <th className="px-6 py-4 text-center text-sm font-semibold text-gray-700">
+                                        Actions
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {data.filter(row => row.department || row.givenBy).map((row, index) => (
+                                    <tr
+                                        key={`dept-${row.id}`}
+                                        className={`hover:bg-gray-50 transition-colors ${editingDeptId === row.id ? 'bg-blue-50' : ''}`}
+                                    >
+                                        <td className="px-6 py-4 text-sm text-gray-500">
+                                            {index + 1}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            {editingDeptId === row.id ? (
+                                                <input
+                                                    type="text"
+                                                    value={editedDeptValues.department}
+                                                    onChange={(e) => setEditedDeptValues(prev => ({ ...prev, department: e.target.value }))}
+                                                    className="w-full px-3 py-2 border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                                    placeholder="Enter department"
+                                                />
+                                            ) : (
+                                                <span className="text-sm text-gray-800 font-medium">
+                                                    {row.department || "-"}
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            {editingDeptId === row.id ? (
+                                                <input
+                                                    type="text"
+                                                    value={editedDeptValues.givenBy}
+                                                    onChange={(e) => setEditedDeptValues(prev => ({ ...prev, givenBy: e.target.value }))}
+                                                    className="w-full px-3 py-2 border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                                    placeholder="Enter given by"
+                                                />
+                                            ) : (
+                                                <span className="text-sm text-gray-600">
+                                                    {row.givenBy || "-"}
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            {editingDeptId === row.id ? (
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <button
+                                                        onClick={() => handleSaveDeptEdit(row)}
+                                                        disabled={savingDept}
+                                                        className="p-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors disabled:opacity-50"
+                                                        title="Save"
+                                                    >
+                                                        {savingDept ? (
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                        ) : (
+                                                            <Save className="h-4 w-4" />
+                                                        )}
+                                                    </button>
+                                                    <button
+                                                        onClick={handleCancelDeptEdit}
+                                                        disabled={savingDept}
+                                                        className="p-2 bg-gray-400 text-white rounded-md hover:bg-gray-500 transition-colors disabled:opacity-50"
+                                                        title="Cancel"
+                                                    >
+                                                        <X className="h-4 w-4" />
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <button
+                                                        onClick={() => handleDeptEditClick(row)}
+                                                        className="p-2 text-blue-600 hover:bg-blue-100 rounded-md transition-colors"
+                                                        title="Edit"
+                                                    >
+                                                        <Pencil className="h-4 w-4" />
+                                                    </button>
+
+                                                </div>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+
+                {/* Footer info */}
+                {!loading && !error && data.length > 0 && (
+                    <div className="mt-4 text-sm text-gray-500 text-center">
+                        Showing {data.length} {data.length === 1 ? 'entry' : 'entries'}
+                    </div>
+                )}
+            </div>
+
+            {/* Add New User Modal */}
+            {showAddModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+                        {/* Modal Header */}
+                        <div className="px-6 py-4 bg-gradient-to-r from-blue-500 to-purple-500">
+                            <div className="flex items-center justify-between">
+                                <h2 className="text-lg font-semibold text-white">Add New User</h2>
+                                <button
+                                    onClick={() => {
+                                        setShowAddModal(false)
+                                        setNewEntry({ doerName: '', password: '', role: '', idEmail: '', number: '' })
+                                    }}
+                                    className="text-white hover:bg-white/20 p-1 rounded transition-colors"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Doer's Name <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    value={newEntry.doerName}
+                                    onChange={(e) => setNewEntry(prev => ({ ...prev, doerName: e.target.value }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Enter name"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Password
+                                </label>
+                                <input
+                                    type="text"
+                                    value={newEntry.password}
+                                    onChange={(e) => setNewEntry(prev => ({ ...prev, password: e.target.value }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono"
+                                    placeholder="Enter password"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Role
+                                </label>
+                                <select
+                                    value={newEntry.role}
+                                    onChange={(e) => setNewEntry(prev => ({ ...prev, role: e.target.value }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                >
+                                    <option value="">Select role</option>
+                                    <option value="user">user</option>
+                                    <option value="admin">admin</option>
+                                    <option value="super_admin">super_admin</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    ID / Email
+                                </label>
+                                <input
+                                    type="text"
+                                    value={newEntry.idEmail}
+                                    onChange={(e) => setNewEntry(prev => ({ ...prev, idEmail: e.target.value }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Enter ID or email"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Number
+                                </label>
+                                <input
+                                    type="text"
+                                    value={newEntry.number}
+                                    onChange={(e) => setNewEntry(prev => ({ ...prev, number: e.target.value }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Enter phone number"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="px-6 py-4 bg-gray-50 flex justify-end gap-3">
+                            <button
+                                onClick={() => {
+                                    setShowAddModal(false)
+                                    setNewEntry({ doerName: '', password: '', role: '', idEmail: '', number: '' })
+                                }}
+                                disabled={adding}
+                                className="px-4 py-2 text-sm text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleAddNewEntry}
+                                disabled={adding}
+                                className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                                {adding ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        Adding...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Plus className="h-4 w-4" />
+                                        Add User
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Add New Department Modal */}
+            {showDeptModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+                        {/* Modal Header */}
+                        <div className="px-6 py-4 bg-gradient-to-r from-blue-500 to-purple-500">
+                            <div className="flex items-center justify-between">
+                                <h2 className="text-lg font-semibold text-white">Add New Department</h2>
+                                <button
+                                    onClick={() => {
+                                        setShowDeptModal(false)
+                                        setNewDeptEntry({ department: '', givenBy: '' })
+                                    }}
+                                    className="text-white hover:bg-white/20 p-1 rounded transition-colors"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Department <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    value={newDeptEntry.department}
+                                    onChange={(e) => setNewDeptEntry(prev => ({ ...prev, department: e.target.value }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Enter department name"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Given By
+                                </label>
+                                <input
+                                    type="text"
+                                    value={newDeptEntry.givenBy}
+                                    onChange={(e) => setNewDeptEntry(prev => ({ ...prev, givenBy: e.target.value }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Enter given by name"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="px-6 py-4 bg-gray-50 flex justify-end gap-3">
+                            <button
+                                onClick={() => {
+                                    setShowDeptModal(false)
+                                    setNewDeptEntry({ department: '', givenBy: '' })
+                                }}
+                                disabled={addingDept}
+                                className="px-4 py-2 text-sm text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleAddDepartment}
+                                disabled={addingDept}
+                                className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                                {addingDept ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        Adding...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Plus className="h-4 w-4" />
+                                        Add Department
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </AdminLayout>
+    )
+}
+
+export default Settings
