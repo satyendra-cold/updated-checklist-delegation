@@ -21,10 +21,10 @@ const CONFIG = {
     "https://script.google.com/macros/s/AKfycbyGf3LdYk6MPiOs_shPU9_AW7wmRjJZ4QxMk9qYqTScsDMB7IliaWRB1HueYy7w5qxqNw/exec",
 
   // Google Drive folder ID for file uploads
-  DRIVE_FOLDER_ID: "1mocSXHZWgUBRpRCpOS_-1L-f0CcVJcl_",
+  DRIVE_FOLDER_ID: "16dsqFDV5s6un6ygwlUp7MMr6AHLcrWk-",
 
   // Sheet names
-  SOURCE_SHEET_NAME: "DELEGATION",
+  SOURCE_SHEET_NAME: "Delegation",
   TARGET_SHEET_NAME: "DELEGATION DONE",
 
   // Page configuration
@@ -94,6 +94,21 @@ function DelegationDataPage() {
   // Add these refs
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const dropdownRef = useRef(null);
+
+  // Add click outside listener to close dropdowns
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setDropdownOpen({ name: false, department: false });
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   // Add camera cleanup useEffect (after other useEffects)
   useEffect(() => {
@@ -667,6 +682,40 @@ function DelegationDataPage() {
       }
     },
     [formatDateToDDMMYYYY, parseDateFromDDMMYYYY]
+  );
+
+  const isOverdue = useCallback(
+    (dateStr) => {
+      if (!dateStr) return false;
+      try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const parsedDate = parseDateFromDDMMYYYY(dateStr);
+        if (!parsedDate) return false;
+        parsedDate.setHours(0, 0, 0, 0);
+        return parsedDate < today;
+      } catch (error) {
+        return false;
+      }
+    },
+    [parseDateFromDDMMYYYY]
+  );
+
+  const isUpcoming = useCallback(
+    (dateStr) => {
+      if (!dateStr) return false;
+      try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const parsedDate = parseDateFromDDMMYYYY(dateStr);
+        if (!parsedDate) return false;
+        parsedDate.setHours(0, 0, 0, 0);
+        return parsedDate > today;
+      } catch (error) {
+        return false;
+      }
+    },
+    [parseDateFromDDMMYYYY]
   );
 
   const sortDateWise = useCallback(
@@ -1354,7 +1403,7 @@ function DelegationDataPage() {
 
             {/* ADMIN FILTERS */}
             {isAdmin && !showHistory && (
-              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full sm:w-auto">
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full sm:w-auto" ref={dropdownRef}>
 
                 {/* NAME FILTER */}
                 <div className="relative w-full sm:w-auto">
@@ -1950,6 +1999,8 @@ function DelegationDataPage() {
                         const rowColorClass = getRowColor(account["col17"]);
                         const taskStatus = statusData[account._id] || "";
                         const isTodayTask = isToday(account["col6"]);
+                        const isOverdueTask = isOverdue(account["col6"]);
+                        const isUpcomingTask = isUpcoming(account["col6"]);
 
 
                         return (
@@ -1958,13 +2009,23 @@ function DelegationDataPage() {
                             className={`${isSelected ? "bg-purple-50" : ""} 
                     hover:bg-gray-50 
                     ${rowColorClass}
-                    ${isTodayTask ? "relative" : ""}
+                    ${isTodayTask || isOverdueTask || isUpcomingTask ? "relative" : ""}
                   `}
                           >
                             <td className="px-6 py-4 min-w-[50px] relative">
+                              {isOverdueTask && (
+                                <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-red-600 text-white text-xs font-bold px-3 py-1 rounded-b-md shadow-md z-10 whitespace-nowrap">
+                                  OVERDUE
+                                </div>
+                              )}
                               {isTodayTask && (
                                 <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-amber-500 text-white text-xs font-bold px-3 py-1 rounded-b-md shadow-md z-10 whitespace-nowrap">
                                   TODAY
+                                </div>
+                              )}
+                              {isUpcomingTask && (
+                                <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-blue-500 text-white text-xs font-bold px-3 py-1 rounded-b-md shadow-md z-10 whitespace-nowrap">
+                                  UPCOMING
                                 </div>
                               )}
                               <input
@@ -2122,29 +2183,20 @@ function DelegationDataPage() {
                             <td className="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap w-[160px]">
                               {account.image ? (
                                 <div className="flex items-center">
-                                  <img
-                                    src={
-                                      typeof account.image === "string"
-                                        ? account.image
-                                        : URL.createObjectURL(account.image)
-                                    }
-                                    alt="Receipt"
-                                    className="h-10 w-10 object-cover rounded-md mr-2"
-                                  />
                                   <div className="flex flex-col">
-                                    <span className="text-xs text-gray-500">
+                                    <span className="text-sm font-medium text-gray-900">
                                       {account.image instanceof File
                                         ? account.image.name
-                                        : "Uploaded Receipt"}
+                                        : "Image Selected"}
                                     </span>
                                     {account.image instanceof File ? (
-                                      <span className="text-xs text-green-600">Ready to upload</span>
+                                      <span className="text-xs text-green-600 font-semibold">Ready to upload</span>
                                     ) : (
                                       <button
-                                        className="text-xs text-purple-600 hover:text-purple-800"
+                                        className="text-xs text-purple-600 hover:text-purple-800 underline mt-1"
                                         onClick={() => window.open(account.image, "_blank")}
                                       >
-                                        View Full Image
+                                        View Image
                                       </button>
                                     )}
                                   </div>
@@ -2161,11 +2213,8 @@ function DelegationDataPage() {
                                     <Upload className="h-4 w-4 mr-1" />
                                     <span className="text-xs">
                                       {account["col9"]?.toUpperCase() === "YES"
-                                        ? "Required Upload"
-                                        : "Upload Image"}
-                                      {account["col9"]?.toUpperCase() === "YES" && (
-                                        <span className="text-red-500 ml-1">*</span>
-                                      )}
+                                        ? "Upload (Required*)"
+                                        : "Upload from File"}
                                     </span>
                                   </label>
 
@@ -2178,18 +2227,7 @@ function DelegationDataPage() {
                                     disabled={!isSelected || isDisabled}
                                   />
 
-                                  <button
-                                    onClick={() => {
-                                      if (!isSelected || isDisabled) return;
-                                      setCurrentCaptureId(account._id);
-                                      startCamera();
-                                    }}
-                                    disabled={!isSelected || isDisabled || isCameraLoading}
-                                    className="flex items-center text-blue-600 hover:text-blue-800 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-                                  >
-                                    <Camera className="h-4 w-4 mr-1" />
-                                    <span>{isCameraLoading ? "Loading..." : "Take Photo"}</span>
-                                  </button>
+                                  {/* Camera functionality removed - only show upload from file */}
                                 </div>
                               )}
                             </td>
@@ -2222,15 +2260,27 @@ function DelegationDataPage() {
                     const rowColorClass = getRowColor(account["col17"]);
                     const taskStatus = statusData[account._id] || "";
                     const isTodayTask = isToday(account["col6"]);
+                    const isOverdueTask = isOverdue(account["col6"]);
+                    const isUpcomingTask = isUpcoming(account["col6"]);
 
                     return (
                       <div key={account._id} className={`bg-white border border-gray-200 rounded-lg p-4 shadow-sm ${isSelected ? "bg-purple-50 border-purple-200" : ""
                         } ${rowColorClass}`}>
 
-                        {/* TODAY Badge */}
+                        {/* Status Badges */}
+                        {isOverdueTask && (
+                          <div className="bg-red-600 text-white text-xs font-bold px-3 py-1 rounded-md shadow-md mb-3 text-center">
+                            OVERDUE
+                          </div>
+                        )}
                         {isTodayTask && (
                           <div className="bg-amber-500 text-white text-xs font-bold px-3 py-1 rounded-md shadow-md mb-3 text-center">
                             TODAY
+                          </div>
+                        )}
+                        {isUpcomingTask && (
+                          <div className="bg-blue-500 text-white text-xs font-bold px-3 py-1 rounded-md shadow-md mb-3 text-center">
+                            UPCOMING
                           </div>
                         )}
 
@@ -2366,47 +2416,24 @@ function DelegationDataPage() {
                           <div className="text-sm">
                             <span className="font-medium">Upload Image: </span>
                             {account.image ? (
-                              <div className="flex items-center mt-2">
-                                <img
-                                  src={
-                                    typeof account.image === "string"
-                                      ? account.image
-                                      : URL.createObjectURL(account.image)
-                                  }
-                                  alt="Receipt"
-                                  className="h-10 w-10 object-cover rounded-md mr-2"
-                                />
-                                <div className="flex flex-col">
-                                  <span className="text-xs text-gray-500">
-                                    {account.image instanceof File ? account.image.name : "Uploaded Receipt"}
-                                  </span>
-                                  {account.image instanceof File ? (
-                                    <span className="text-xs text-green-600">Ready to upload</span>
-                                  ) : (
-                                    <button
-                                      className="text-xs text-purple-600 hover:text-purple-800"
-                                      onClick={() => window.open(account.image, "_blank")}
-                                    >
-                                      View Full Image
-                                    </button>
-                                  )}
-                                </div>
+                              <div className="flex flex-col mt-2">
+                                <span className="text-sm font-semibold text-gray-900">
+                                  {account.image instanceof File ? account.image.name : "Image Selected"}
+                                </span>
+                                {account.image instanceof File ? (
+                                  <span className="text-xs text-green-600 font-bold">Ready to upload</span>
+                                ) : (
+                                  <button
+                                    className="text-xs text-purple-600 hover:text-purple-800 underline mt-1 text-left"
+                                    onClick={() => window.open(account.image, "_blank")}
+                                  >
+                                    View Image
+                                  </button>
+                                )}
                               </div>
                             ) : (
                               <div className="flex items-center space-x-2 mt-2">
-                                <button
-                                  onClick={() => {
-                                    if (!isSelected || isDisabled) return;
-                                    setCurrentCaptureId(account._id);
-                                    startCamera();
-                                  }}
-                                  disabled={!isSelected || isDisabled}
-                                  className={`flex items-center px-3 py-2 rounded-lg border-2 text-sm font-medium ${isSelected ? "bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100 shadow-md" : "bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed"
-                                    } disabled:opacity-50 disabled:cursor-not-allowed`}
-                                >
-                                  <Camera className="h-4 w-4 mr-1" />
-                                  <span>Camera</span>
-                                </button>
+                                {/* Camera button removed */}
 
                                 <label className={`flex items-center px-3 py-2 rounded-lg border-2 text-sm font-medium ${isSelected
                                   ? account["col9"]?.toUpperCase() === "YES"
@@ -2415,7 +2442,7 @@ function DelegationDataPage() {
                                   : "bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed"
                                   }`}>
                                   <Upload className="h-4 w-4 mr-1" />
-                                  <span>{account["col9"]?.toUpperCase() === "YES" ? "Required*" : "Gallery"}</span>
+                                  <span>{account["col9"]?.toUpperCase() === "YES" ? "Upload (Required*)" : "Upload from File"}</span>
                                   <input
                                     type="file"
                                     className="hidden"

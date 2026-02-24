@@ -34,6 +34,78 @@ const CONFIG = {
   },
 };
 
+
+
+// Helper functions moved out of component for performance
+const formatDateTimeToDDMMYYYY = (date) => {
+  const day = date.getDate().toString().padStart(2, "0");
+  const month = (date.getMonth() + 1).toString().padStart(2, "0");
+  const year = date.getFullYear();
+  const hours = date.getHours().toString().padStart(2, "0");
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  const seconds = date.getSeconds().toString().padStart(2, "0");
+  return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+};
+
+const formatDateToDDMMYYYY = (date) => {
+  const day = date.getDate().toString().padStart(2, "0");
+  const month = (date.getMonth() + 1).toString().padStart(2, "0");
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
+const isEmpty = (value) => {
+  return (
+    value === null ||
+    value === undefined ||
+    (typeof value === "string" && value.trim() === "")
+  );
+};
+
+const parseGoogleSheetsDateTime = (dateTimeStr) => {
+  if (!dateTimeStr) return "";
+  if (typeof dateTimeStr === "string" && dateTimeStr.match(/^\d{2}\/\d{2}\/\d{4}( \d{2}:\d{2}:\d{2})?$/)) {
+    return dateTimeStr;
+  }
+  if (typeof dateTimeStr === "string" && dateTimeStr.startsWith("Date(")) {
+    const match = /Date\((\d+),(\d+),(\d+)\)/.exec(dateTimeStr);
+    if (match) {
+      const year = Number.parseInt(match[1], 10);
+      const month = Number.parseInt(match[2], 10);
+      const day = Number.parseInt(match[3], 10);
+      return `${day.toString().padStart(2, "0")}/${(month + 1).toString().padStart(2, "0")}/${year}`;
+    }
+  }
+  try {
+    const date = new Date(dateTimeStr);
+    if (!isNaN(date.getTime())) {
+      if (typeof dateTimeStr === "string" && (dateTimeStr.includes(":") || dateTimeStr.includes("T"))) {
+        return formatDateTimeToDDMMYYYY(date);
+      }
+      return formatDateToDDMMYYYY(date);
+    }
+  } catch (error) {
+    console.error("Error parsing date-time:", error);
+  }
+  return dateTimeStr;
+};
+
+const parseDateFromDDMMYYYY = (dateStr) => {
+  if (!dateStr || typeof dateStr !== "string") return null;
+  const datePart = dateStr.includes(" ") ? dateStr.split(" ")[0] : dateStr;
+  const parts = datePart.split("/");
+  if (parts.length !== 3) return null;
+  return new Date(parts[2], parts[1] - 1, parts[0]);
+};
+
+const convertToDateTimeLocal = (dateStr) => {
+  if (!dateStr) return "";
+  const [datePart, timePart] = dateStr.split(" ");
+  if (!datePart || !timePart) return "";
+  const [day, month, year] = datePart.split("/");
+  return `${year}-${month}-${day}T${timePart.substring(0, 5)}`;
+};
+
 function Approval() {
   const [accountData, setAccountData] = useState([]);
   const [successMessage, setSuccessMessage] = useState("");
@@ -49,6 +121,14 @@ function Approval() {
   // UPDATED: Always set to 'super_admin' for unrestricted access
   const [userRole, setUserRole] = useState("super_admin");
   const [username, setUsername] = useState("");
+
+  useEffect(() => {
+    // UPDATED: Use authUtils for super_admin access
+    const role = getUserRole(); // Always returns 'super_admin'
+    const user = getUsername();
+    setUserRole(role);
+    setUsername(user);
+  }, []);
 
   // NEW: Admin history selection states
   const [selectedHistoryItems, setSelectedHistoryItems] = useState([]);
@@ -66,115 +146,11 @@ function Approval() {
   const [bulkRemarks, setBulkRemarks] = useState("");
   const [savingEdits, setSavingEdits] = useState(new Set());
 
-
   const [delegationHistoryData, setDelegationHistoryData] = useState([]);
   const [activeApprovalTab, setActiveApprovalTab] = useState('checklist');
 
   // UPDATED: Always true for super_admin access
   const isAdmin = true;
-
-  // UPDATED: Format date-time to DD/MM/YYYY HH:MM:SS
-  const formatDateTimeToDDMMYYYY = (date) => {
-    const day = date.getDate().toString().padStart(2, "0");
-    const month = (date.getMonth() + 1).toString().padStart(2, "0");
-    const year = date.getFullYear();
-    const hours = date.getHours().toString().padStart(2, "0");
-    const minutes = date.getMinutes().toString().padStart(2, "0");
-    const seconds = date.getSeconds().toString().padStart(2, "0");
-    return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
-  };
-
-  // UPDATED: Format date only to DD/MM/YYYY (for comparison purposes)
-  const formatDateToDDMMYYYY = (date) => {
-    const day = date.getDate().toString().padStart(2, "0");
-    const month = (date.getMonth() + 1).toString().padStart(2, "0");
-    const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
-  };
-
-  const isEmpty = (value) => {
-    return (
-      value === null ||
-      value === undefined ||
-      (typeof value === "string" && value.trim() === "")
-    );
-  };
-
-  useEffect(() => {
-    // UPDATED: Use authUtils for super_admin access
-    const role = getUserRole(); // Always returns 'super_admin'
-    const user = getUsername();
-    setUserRole(role);
-    setUsername(user);
-  }, []);
-
-  // UPDATED: Parse Google Sheets date-time to handle DD/MM/YYYY HH:MM:SS format
-  const parseGoogleSheetsDateTime = (dateTimeStr) => {
-    if (!dateTimeStr) return "";
-    // If already in DD/MM/YYYY HH:MM:SS format, return as is
-    if (
-      typeof dateTimeStr === "string" &&
-      dateTimeStr.match(/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/)
-    ) {
-      return dateTimeStr;
-    }
-    // If in DD/MM/YYYY format (without time), return as is
-    if (
-      typeof dateTimeStr === "string" &&
-      dateTimeStr.match(/^\d{2}\/\d{2}\/\d{4}$/)
-    ) {
-      return dateTimeStr;
-    }
-    // Handle Google Sheets Date(year,month,day) format
-    if (typeof dateTimeStr === "string" && dateTimeStr.startsWith("Date(")) {
-      const match = /Date\((\d+),(\d+),(\d+)\)/.exec(dateTimeStr);
-      if (match) {
-        const year = Number.parseInt(match[1], 10);
-        const month = Number.parseInt(match[2], 10);
-        const day = Number.parseInt(match[3], 10);
-        return `${day.toString().padStart(2, "0")}/${(month + 1)
-          .toString()
-          .padStart(2, "0")}/${year}`;
-      }
-    }
-    // Try to parse as a regular date
-    try {
-      const date = new Date(dateTimeStr);
-      if (!isNaN(date.getTime())) {
-        // Check if the original string contained time information
-        if (
-          typeof dateTimeStr === "string" &&
-          (dateTimeStr.includes(":") || dateTimeStr.includes("T"))
-        ) {
-          return formatDateTimeToDDMMYYYY(date);
-        } else {
-          return formatDateToDDMMYYYY(date);
-        }
-      }
-    } catch (error) {
-      console.error("Error parsing date-time:", error);
-    }
-    return dateTimeStr;
-  };
-
-  // UPDATED: Parse date from DD/MM/YYYY or DD/MM/YYYY HH:MM:SS format for comparison
-  const parseDateFromDDMMYYYY = (dateStr) => {
-    if (!dateStr || typeof dateStr !== "string") return null;
-
-    // Extract just the date part if it includes time
-    const datePart = dateStr.includes(" ") ? dateStr.split(" ")[0] : dateStr;
-    const parts = datePart.split("/");
-    if (parts.length !== 3) return null;
-    return new Date(parts[2], parts[1] - 1, parts[0]);
-  };
-
-  const convertToDateTimeLocal = (dateStr) => {
-    if (!dateStr) return "";
-    const [datePart, timePart] = dateStr.split(" ");
-    if (!datePart || !timePart) return "";
-    const [day, month, year] = datePart.split("/");
-    return `${year}-${month}-${day}T${timePart.substring(0, 5)}`;
-  };
 
   const resetFilters = () => {
     setSearchTerm("");
@@ -187,9 +163,10 @@ function Approval() {
   const handleEditClick = (historyItem) => {
     const rowId = historyItem._id;
     setEditingRows((prev) => new Set([...prev, rowId]));
+    const adminDoneCol = historyItem._sheetType === 'delegation' ? 'col19' : 'col15';
     setEditedAdminStatus((prev) => ({
       ...prev,
-      [rowId]: historyItem["col15"] || "",
+      [rowId]: historyItem[adminDoneCol] || "",
     }));
     setEditedRemarks((prev) => ({
       ...prev,
@@ -601,12 +578,15 @@ function Approval() {
   }, [delegationHistoryData, searchTerm, selectedMembers, startDate, endDate]);
 
 
-  const getTaskStatistics = () => {
-    const totalCompleted = historyData.length;
+  const getTaskStatistics = useMemo(() => {
+    const data = activeApprovalTab === 'checklist' ? historyData : delegationHistoryData;
+    const filteredData = activeApprovalTab === 'checklist' ? filteredHistoryData : filteredDelegationHistoryData;
+
+    const totalCompleted = data.length;
     const memberStats =
       selectedMembers.length > 0
         ? selectedMembers.reduce((stats, member) => {
-          const memberTasks = historyData.filter(
+          const memberTasks = data.filter(
             (task) => task["col4"] === member
           ).length;
           return {
@@ -615,13 +595,13 @@ function Approval() {
           };
         }, {})
         : {};
-    const filteredTotal = filteredHistoryData.length;
+    const filteredTotal = filteredData.length;
     return {
       totalCompleted,
       memberStats,
       filteredTotal,
     };
-  };
+  }, [activeApprovalTab, historyData, delegationHistoryData, filteredHistoryData, filteredDelegationHistoryData, selectedMembers]);
 
   const handleMemberSelection = (member) => {
     setSelectedMembers((prev) => {
@@ -642,210 +622,109 @@ function Approval() {
     try {
       setLoading(true);
 
-      // Fetch Checklist data
-      const checklistResponse = await fetch(
-        `${CONFIG.APPS_SCRIPT_URL}?sheet=${CONFIG.SHEET_NAME}&action=fetch`
-      );
-      if (!checklistResponse.ok) {
-        throw new Error(`Failed to fetch checklist data: ${checklistResponse.status}`);
-      }
-      const checklistText = await checklistResponse.text();
-      let checklistData;
-      try {
-        checklistData = JSON.parse(checklistText);
-      } catch (parseError) {
-        const jsonStart = checklistText.indexOf("{");
-        const jsonEnd = checklistText.lastIndexOf("}");
-        if (jsonStart !== -1 && jsonEnd !== -1) {
-          const jsonString = checklistText.substring(jsonStart, jsonEnd + 1);
-          checklistData = JSON.parse(jsonString);
-        } else {
-          throw new Error("Invalid JSON response from server");
+      // Fetch both sheets in parallel for better performance
+      const [checklistResponse, delegationResponse] = await Promise.all([
+        fetch(`${CONFIG.APPS_SCRIPT_URL}?sheet=${CONFIG.SHEET_NAME}&action=fetch`),
+        fetch(`${CONFIG.APPS_SCRIPT_URL}?sheet=Delegation&action=fetch`)
+      ]);
+
+      if (!checklistResponse.ok) throw new Error(`Checklist fetch failed: ${checklistResponse.status}`);
+      if (!delegationResponse.ok) throw new Error(`Delegation fetch failed: ${delegationResponse.status}`);
+
+      const [checklistText, delegationText] = await Promise.all([
+        checklistResponse.text(),
+        delegationResponse.text()
+      ]);
+
+      const parseResponse = (text) => {
+        try {
+          return JSON.parse(text);
+        } catch (e) {
+          const start = text.indexOf("{"), end = text.lastIndexOf("}");
+          if (start !== -1 && end !== -1) return JSON.parse(text.substring(start, end + 1));
+          throw new Error("Invalid format");
         }
-      }
+      };
 
-      // Fetch Delegation data
-      const delegationResponse = await fetch(
-        `${CONFIG.APPS_SCRIPT_URL}?sheet=Delegation&action=fetch`
-      );
-      if (!delegationResponse.ok) {
-        throw new Error(`Failed to fetch delegation data: ${delegationResponse.status}`);
-      }
-      const delegationText = await delegationResponse.text();
-      let delegationData;
-      try {
-        delegationData = JSON.parse(delegationText);
-      } catch (parseError) {
-        const jsonStart = delegationText.indexOf("{");
-        const jsonEnd = delegationText.lastIndexOf("}");
-        if (jsonStart !== -1 && jsonEnd !== -1) {
-          const jsonString = delegationText.substring(jsonStart, jsonEnd + 1);
-          delegationData = JSON.parse(jsonString);
-        } else {
-          throw new Error("Invalid JSON response from server");
-        }
-      }
+      const checklistData = parseResponse(checklistText);
+      const delegationData = parseResponse(delegationText);
 
-      // UPDATED: Use authUtils for super_admin access
-      const currentUsername = getUsername();
-      const currentUserRole = getUserRole(); // Always returns 'super_admin'
-      const isSuperAdmin = isAdminUser(); // Always returns true
-      const today = new Date();
-      const tomorrow = new Date(today);
-      tomorrow.setDate(today.getDate() + 1);
-      const todayStr = formatDateToDDMMYYYY(today);
-      const tomorrowStr = formatDateToDDMMYYYY(tomorrow);
-
+      const currentUsername = getUsername()?.toLowerCase();
+      const isSuperAdmin = isAdminUser();
       const membersSet = new Set();
 
-      // Process Checklist data
       const processSheetData = (data, sheetType) => {
         const historyRows = [];
-        let rows = [];
+        let rows = data.table?.rows || (Array.isArray(data) ? data : data.values?.map(r => ({ c: r.map(v => ({ v })) }))) || [];
 
-        if (data.table && data.table.rows) {
-          rows = data.table.rows;
-        } else if (Array.isArray(data)) {
-          rows = data;
-        } else if (data.values) {
-          rows = data.values.map((row) => ({
-            c: row.map((val) => ({ v: val })),
-          }));
-        }
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          let rowValues = row.c ? row.c.map(cell => cell?.v ?? "") : (Array.isArray(row) ? row : []);
+          if (rowValues.length === 0) continue;
 
-        rows.forEach((row, rowIndex) => {
-          if (rowIndex === 0) return;
-          let rowValues = [];
-          if (row.c) {
-            rowValues = row.c.map((cell) =>
-              cell && cell.v !== undefined ? cell.v : ""
-            );
-          } else if (Array.isArray(row)) {
-            rowValues = row;
-          } else {
-            return;
-          }
+          // Standard check for visibility based on sheet type
+          const assignedTo = sheetType === 'checklist' ? (rowValues[4] || "Unassigned") : (rowValues[7] || "Unassigned");
+          if (assignedTo) membersSet.add(assignedTo);
 
-          const assignedTo = rowValues[4] || "Unassigned";
-          membersSet.add(assignedTo);
-          // UPDATED: Super admin sees all data - no filtering
-          const isUserMatch = isSuperAdmin || assignedTo.toLowerCase() === currentUsername.toLowerCase();
-          if (!isUserMatch && !isSuperAdmin) return;
+          const isUserMatch = isSuperAdmin || (assignedTo.toLowerCase() === currentUsername);
+          if (!isUserMatch) continue;
 
-          const columnGValue = rowValues[6]; // Task End Date
-          const columnKValue = rowValues[10]; // Actual Date
-          const columnMValue = rowValues[12]; // Status (DONE)
-          const columnPValue = sheetType === 'checklist' ? rowValues[15] : rowValues[19]; // Admin Done column
+          // Quick check for completion before heavy object processing
+          const isCompleted = sheetType === 'checklist'
+            ? (!isEmpty(rowValues[6]) && !isEmpty(rowValues[10]))
+            : !isEmpty(rowValues[11]);
 
-          if (columnMValue && columnMValue.toString().trim() === "DONE") {
-            return;
-          }
+          if (!isCompleted) continue;
 
-          const rowDateStr = columnGValue ? String(columnGValue).trim() : "";
-          const formattedRowDate = parseGoogleSheetsDateTime(rowDateStr);
-          const googleSheetsRowIndex = rowIndex + 1;
-
+          const googleSheetsRowIndex = i + 1;
           const taskId = rowValues[1] || "";
-          const stableId = taskId
-            ? `${sheetType}_task_${taskId}_${googleSheetsRowIndex}`
-            : `${sheetType}_row_${googleSheetsRowIndex}_${Math.random()
-              .toString(36)
-              .substring(2, 15)}`;
-
           const rowData = {
-            _id: stableId,
+            _id: `${sheetType}_${taskId}_${googleSheetsRowIndex}_${i}`,
             _rowIndex: googleSheetsRowIndex,
             _taskId: taskId,
             _sheetType: sheetType,
           };
 
-          const columnHeaders = sheetType === 'checklist' ? [
-            { id: "col0", label: "Timestamp", type: "string" },
-            { id: "col1", label: "Task ID", type: "string" },
-            { id: "col2", label: "Firm", type: "string" },
-            { id: "col3", label: "Given By", type: "string" },
-            { id: "col4", label: "Name", type: "string" },
-            { id: "col5", label: "Task Description", type: "string" },
-            { id: "col6", label: "Task End Date", type: "datetime" },
-            { id: "col7", label: "Freq", type: "string" },
-            { id: "col8", label: "Enable Reminders", type: "string" },
-            { id: "col9", label: "Require Attachment", type: "string" },
-            { id: "col10", label: "Actual", type: "datetime" },
-            { id: "col11", label: "Column L", type: "string" },
-            { id: "col12", label: "Status", type: "string" },
-            { id: "col13", label: "Remarks", type: "string" },
-            { id: "col14", label: "Uploaded Image", type: "string" },
-            { id: "col15", label: "Admin Done", type: "string" }, // Column P for Checklist
-          ] : [
-            { id: "col0", label: "Timestamp", type: "string" },
-            { id: "col1", label: "Task ID", type: "string" },
-            { id: "col2", label: "Firm", type: "string" },
-            { id: "col3", label: "Given By", type: "string" },
-            { id: "col4", label: "Name", type: "string" },
-            { id: "col5", label: "Task Description", type: "string" },
-            { id: "col6", label: "Task End Date", type: "datetime" },
-            { id: "col7", label: "Freq", type: "string" },
-            { id: "col8", label: "Enable Reminders", type: "string" },
-            { id: "col9", label: "Require Attachment", type: "string" },
-            { id: "col10", label: "Actual", type: "datetime" },
-            { id: "col11", label: "Column L", type: "string" },
-            { id: "col12", label: "Status", type: "string" },
-            { id: "col13", label: "Remarks", type: "string" },
-            { id: "col14", label: "Uploaded Image", type: "string" },
-            { id: "col15", label: "Column P", type: "string" },
-            { id: "col16", label: "Column Q", type: "string" },
-            { id: "col17", label: "Column R", type: "string" },
-            { id: "col18", label: "Column S", type: "string" },
-            { id: "col19", label: "Admin Done", type: "string" }, // Column T for Delegation
-          ];
-
-          columnHeaders.forEach((header, index) => {
-            const cellValue = rowValues[index];
-            if (
-              header.type === "datetime" ||
-              header.type === "date" ||
-              (cellValue && String(cellValue).startsWith("Date("))
-            ) {
-              rowData[header.id] = cellValue
-                ? parseGoogleSheetsDateTime(String(cellValue))
-                : "";
-            } else if (
-              header.type === "number" &&
-              cellValue !== null &&
-              cellValue !== ""
-            ) {
-              rowData[header.id] = cellValue;
-            } else {
-              rowData[header.id] = cellValue !== null ? cellValue : "";
-            }
-          });
-
-          const hasColumnG = !isEmpty(columnGValue);
-          const isColumnKEmpty = isEmpty(columnKValue);
-
-          // UPDATED: For history, super_admin sees ALL completed tasks regardless of Column P/T status
-          if (hasColumnG && !isColumnKEmpty) {
-            // Super admin always has access to all history
-            const isUserHistoryMatch = isSuperAdmin || assignedTo.toLowerCase() === currentUsername.toLowerCase();
-            if (isUserHistoryMatch) {
-              historyRows.push(rowData);
-            }
+          if (sheetType === 'checklist') {
+            const cols = ["col0", "col1", "col2", "col3", "col4", "col5", "col6", "col7", "col8", "col9", "col10", "col11", "col12", "col13", "col14", "col15", "col16", "col17", "col18", "col19"];
+            cols.forEach((h, idx) => {
+              const val = rowValues[idx];
+              rowData[h] = (idx === 6 || idx === 10) ? parseGoogleSheetsDateTime(String(val ?? "")) : (val ?? "");
+            });
+          } else {
+            rowData["col0"] = rowValues[0] || "";
+            rowData["col1"] = rowValues[1] || "";
+            rowData["col2"] = rowValues[2] || "DELEGATION";
+            rowData["col3"] = rowValues[3] || "ADMIN";
+            rowData["col4"] = assignedTo;
+            rowData["col5"] = rowValues[5] || "—";
+            rowData["col6"] = rowValues[10] || "";
+            rowData["col7"] = "One-time";
+            rowData["col8"] = rowValues[8] || "No";
+            rowData["col9"] = rowValues[9] || "No";
+            rowData["col10"] = parseGoogleSheetsDateTime(String(rowValues[11] || ""));
+            rowData["col12"] = rowValues[13] || "DONE";
+            rowData["col13"] = rowValues[14] || "";
+            rowData["col14"] = rowValues[15] || "";
+            rowData["col19"] = rowValues[19] || "";
           }
-        });
-
+          historyRows.push(rowData);
+        }
         return historyRows;
       };
 
-      const checklistHistory = processSheetData(checklistData, 'checklist');
-      const delegationHistory = processSheetData(delegationData, 'delegation');
+      const [checklistHistory, delegationHistory] = [
+        processSheetData(checklistData, 'checklist'),
+        processSheetData(delegationData, 'delegation')
+      ];
 
-      setMembersList(Array.from(membersSet).sort());
+      if (membersSet.size > 0) setMembersList(Array.from(membersSet).sort());
       setHistoryData(checklistHistory);
       setDelegationHistoryData(delegationHistory);
       setLoading(false);
     } catch (error) {
-      console.error("Error fetching sheet data:", error);
-      setError("Failed to load account data: " + error.message);
+      console.error("Fetch error:", error);
+      setError("Failed to load data: " + error.message);
       setLoading(false);
     }
   }, []);
@@ -919,7 +798,7 @@ function Approval() {
           <div className="rounded-lg border border-purple-200 shadow-md bg-white overflow-hidden">
             <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
               <h2 className="text-purple-700 font-medium">
-                {`Completed ${CONFIG.SHEET_NAME} Tasks`}
+                {`Completed ${activeApprovalTab === 'checklist' ? 'Checklist' : 'Delegation'} Tasks`}
               </h2>
               <p className="text-purple-600 text-sm">
                 {`${CONFIG.PAGE_CONFIG.historyDescription} for ${isAdmin ? "all" : "your"
@@ -1107,7 +986,7 @@ function Approval() {
                           Total Completed
                         </span>
                         <div className="text-lg font-semibold text-blue-600">
-                          {getTaskStatistics().totalCompleted}
+                          {getTaskStatistics.totalCompleted}
                         </div>
                       </div>
                       {(selectedMembers.length > 0 ||
@@ -1119,7 +998,7 @@ function Approval() {
                               Filtered Results
                             </span>
                             <div className="text-lg font-semibold text-blue-600">
-                              {getTaskStatistics().filteredTotal}
+                              {getTaskStatistics.filteredTotal}
                             </div>
                           </div>
                         )}
@@ -1130,7 +1009,7 @@ function Approval() {
                         >
                           <span className="text-xs text-gray-500">{member}</span>
                           <div className="text-lg font-semibold text-indigo-600">
-                            {getTaskStatistics().memberStats[member]}
+                            {getTaskStatistics.memberStats[member]}
                           </div>
                         </div>
                       ))}
@@ -1566,7 +1445,7 @@ function Approval() {
 
                               <td className="px-3 py-4 min-w-[100px]">
                                 {(() => {
-                                  const attachmentCol = history._sheetType === 'delegation' ? history["col15"] : history["col14"];
+                                  const attachmentCol = history["col14"];
                                   return attachmentCol ? (
                                     <a href={attachmentCol}
                                       target="_blank"
@@ -1612,8 +1491,8 @@ function Approval() {
 
                 {/* Mobile Card View */}
                 <div className="sm:hidden space-y-4 p-4 max-h-[calc(100vh-300px)] overflow-auto">
-                  {filteredHistoryData.length > 0 ? (
-                    filteredHistoryData.map((history) => {
+                  {(activeApprovalTab === 'checklist' ? filteredHistoryData : filteredDelegationHistoryData).length > 0 ? (
+                    (activeApprovalTab === 'checklist' ? filteredHistoryData : filteredDelegationHistoryData).map((history) => {
                       const isInEditMode = editingRows.has(history._id);
                       const isSaving = savingEdits.has(history._id);
 
@@ -1701,7 +1580,7 @@ function Approval() {
                                 </span>
                                 {/* Copy your admin status display/editing logic here */}
                                 {(() => {
-                                  const adminDoneColumn = history._sheetType === 'delegation' ? 'col19' : 'col15';
+                                  const adminDoneColumn = history._sheetType === 'delegation' ? 'col19' : 'col19';
                                   return isInEditMode ? (
                                     // Edit mode
                                     <div className="flex items-center space-x-2">
@@ -1866,7 +1745,7 @@ function Approval() {
                                 </span>
                                 <div className="mt-1">
                                   {(() => {
-                                    const attachmentCol = history._sheetType === 'delegation' ? history["col15"] : history["col14"];
+                                    const attachmentCol = history["col14"];
                                     return attachmentCol ? (
                                       <a href={attachmentCol}
                                         target="_blank"

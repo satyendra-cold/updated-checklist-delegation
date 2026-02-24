@@ -1,7 +1,7 @@
 "use client"
 import { useEffect, useState, useCallback, useRef } from "react";
 import { format } from 'date-fns';
-import { Search, ChevronDown, Filter, Trash2 } from "lucide-react";
+import { Search, ChevronDown, Filter, Trash2, Save } from "lucide-react";
 import AdminLayout from "../components/layout/AdminLayout";
 import DelegationPage from "./delegation-data";
 import { getUserRole, getUsername, isAdminUser, isSuperAdmin } from "../utils/authUtils";
@@ -179,6 +179,7 @@ export default function QuickTask() {
     return dateString; // Return whatever was in the input field
   };
 
+
   // CONFIG must be defined before functions that use it
   const CONFIG = {
     SHEET_ID: "1YCLFppf8OrwZjKjhVyVB77s63vFQUylXzEniWLeatW0/",
@@ -193,147 +194,69 @@ export default function QuickTask() {
   };
 
 
-
-
-  const submitSelectedTasks = async () => {
-    // Prevent double submission
-    if (submitting) {
-      console.log("Already submitting, ignoring duplicate call");
-      return;
-    }
-
-    // Validate we have tasks to submit
-    if (selectedRows.size === 0) {
-      alert('No tasks selected');
-      return;
-    }
+  // Function to update a single task
+  const handleUpdateRow = async (taskInternalId) => {
+    if (submitting) return;
 
     try {
       setSubmitting(true);
+      const userAppScriptUrl = CONFIG.APPS_SCRIPT_URL;
+      const originalTask = tasks.find(t => t._id === taskInternalId);
+      const editedTask = editedData[taskInternalId];
 
-      const userAppScriptUrl = "https://script.google.com/macros/s/AKfycbyGf3LdYk6MPiOs_shPU9_AW7wmRjJZ4QxMk9qYqTScsDMB7IliaWRB1HueYy7w5qxqNw/exec";
-
-      // Log selected rows to check for duplicates
-      console.log("=== SELECTED ROWS ===");
-      console.log("Selected row IDs:", Array.from(selectedRows));
-      console.log("Number of selected:", selectedRows.size);
-
-      // Build tasks to update using EXISTING Task IDs and row indices
-      const tasksToUpdate = Array.from(selectedRows).map((taskInternalId) => {
-        const editedTask = editedData[taskInternalId];
-        // Use 'tasks' array (original unfiltered) to find the original task with _rowIndex
-        const originalTask = tasks.find(t => t._id === taskInternalId);
-
-        if (!originalTask) {
-          console.error(`Original task not found for ID: ${taskInternalId}`);
-          return null;
-        }
-
-        // Use the EXISTING Task ID and rowIndex from the original task
-        const existingTaskId = originalTask['Task ID'];
-        const rowIndex = originalTask._rowIndex;
-
-        // Validate rowIndex
-        if (!rowIndex || rowIndex < 2) {
-          console.error(`Invalid rowIndex (${rowIndex}) for task ID: ${existingTaskId}`);
-          return null;
-        }
-
-        // Log for debugging
-        console.log("=== Task Update Debug ===");
-        console.log("Internal ID:", taskInternalId);
-        console.log("Existing Task ID:", existingTaskId);
-        console.log("Row Index (sheet row):", rowIndex);
-        console.log("Original Task:", originalTask);
-        console.log("Edited Task:", editedTask);
-
-        // Build row data array for ALL columns (A through J)
-        // Backend expects: rowData[0] = Column A, rowData[1] = Column B, etc.
-        // Empty strings are skipped by the backend
-        const rowData = [
-          "", // Column A (index 0) - Timestamp - keep original, don't update
-          String(existingTaskId), // Column B (index 1) - Task ID - keep same
-          editedTask?.Department || originalTask?.Department || "", // Column C (index 2)
-          editedTask?.['Given By'] || originalTask?.['Given By'] || "", // Column D (index 3)
-          editedTask?.Name || originalTask?.Name || "", // Column E (index 4)
-          editedTask?.['Task Description'] || originalTask?.['Task Description'] || "", // Column F (index 5)
-          formatDateForSheet(editedTask?.['End Date'] || originalTask?.['End Date']), // Column G (index 6)
-          editedTask?.Frequency || originalTask?.Frequency || "", // Column H (index 7)
-          editedTask?.Reminders || originalTask?.Reminders || "", // Column I (index 8)
-          editedTask?.Attachment || originalTask?.Attachment || "" // Column J (index 9)
-        ];
-
-        console.log("Row Data to send:", rowData);
-
-        return {
-          rowIndex: rowIndex,
-          taskId: String(existingTaskId),
-          rowData: rowData
-        };
-      }).filter(Boolean); // Remove null entries
-
-      if (tasksToUpdate.length === 0) {
-        throw new Error('No valid tasks to update. Check console for errors.');
+      if (!originalTask || !editedTask) {
+        throw new Error('Task data not found');
       }
 
-      // console.log("=== Final Tasks to Update ===");
-      // console.log(JSON.stringify(tasksToUpdate, null, 2));
+      const existingTaskId = originalTask['Task ID'];
+      const rowIndex = originalTask._rowIndex;
 
-      // Update each task using the 'update' action (matches backend doPost)
-      let successCount = 0;
-      for (const task of tasksToUpdate) {
-        // Build the request body
-        const requestBody = {
-          sheetName: CONFIG.CHECKLIST_SHEET,
-          action: 'updateQuickTask',
-          taskId: task.taskId,
-          rowData: JSON.stringify(task.rowData)
-        };
+      const rowData = [
+        "", // Column A - Timestamp
+        String(existingTaskId), // Column B - Task ID
+        editedTask.Department || originalTask.Department || "",
+        editedTask['Given By'] || originalTask['Given By'] || "",
+        editedTask.Name || originalTask.Name || "",
+        editedTask['Task Description'] || originalTask['Task Description'] || "",
+        formatDateForSheet(editedTask['End Date'] || originalTask['End Date']),
+        editedTask.Frequency || originalTask.Frequency || "",
+        editedTask.Reminders || originalTask.Reminders || "",
+        editedTask.Attachment || originalTask.Attachment || ""
+      ];
 
-        // console.log("=== REQUEST DETAILS ===");
-        // console.log("URL:", userAppScriptUrl);
-        // console.log("Sheet:", requestBody.sheetName);
-        // console.log("Action:", requestBody.action);
-        // console.log("Task ID:", requestBody.taskId);
-        // console.log("Row Data:", requestBody.rowData);
+      const requestBody = {
+        sheetName: CONFIG.CHECKLIST_SHEET,
+        action: 'updateQuickTask',
+        taskId: String(existingTaskId),
+        rowData: JSON.stringify(rowData)
+      };
 
-        // Use URLSearchParams as the backend expects form data
-        const response = await fetch(userAppScriptUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams(requestBody)
-        });
+      const response = await fetch(userAppScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(requestBody)
+      });
 
-        if (!response.ok) {
-          console.error(`Failed to update task ${task.taskId}: HTTP ${response.status}`);
-          continue;
-        }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const result = await response.json();
 
-        const result = await response.json();
-        console.log(`=== FULL BACKEND RESPONSE for Task ID ${task.taskId} ===`);
-        console.log(JSON.stringify(result, null, 2));
+      if (result.success) {
+        alert('Task updated successfully!');
+        // Remove from editing mode after success
+        const newEditing = new Set(editingRows);
+        newEditing.delete(taskInternalId);
+        setEditingRows(newEditing);
 
-        if (result.success) {
-          successCount++;
-        } else {
-          console.error(`Failed to update task ${task.taskId}:`, result.error || result.message);
-        }
-      }
+        const newSelected = new Set(selectedRows);
+        newSelected.delete(taskInternalId);
+        setSelectedRows(newSelected);
 
-      setSelectedRows(new Set());
-      setEditingRows(new Set());
-      setEditedData({});
-      await fetchChecklistData();
-
-      if (successCount === tasksToUpdate.length) {
-        alert(`Successfully updated ${successCount} task(s)!`);
-      } else if (successCount > 0) {
-        alert(`Updated ${successCount} of ${tasksToUpdate.length} task(s). Some updates may have failed.`);
+        await fetchChecklistData();
       } else {
-        throw new Error('No tasks were updated. Please check the console for errors.');
+        throw new Error(result.error || result.message);
       }
     } catch (error) {
-      console.error('Submission error:', error);
+      console.error('Update error:', error);
       alert(`Error: ${error.message}`);
     } finally {
       setSubmitting(false);
@@ -845,21 +768,6 @@ export default function QuickTask() {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-5 w-full sm:w-auto">
-            <div className="flex border border-purple-200 rounded-md overflow-hidden self-start">
-              <button
-                className={`px-4 py-2 text-sm font-medium ${activeTab === 'checklist' ? 'bg-purple-600 text-white' : 'bg-white text-purple-600 hover:bg-purple-50'}`}
-                onClick={() => setActiveTab('checklist')}
-              >
-                Unique Task
-              </button>
-              <button
-                className={`px-4 py-2 text-sm font-medium ${activeTab === 'delegation' ? 'bg-purple-600 text-white' : 'bg-white text-purple-600 hover:bg-purple-50'}`}
-                onClick={() => setActiveTab('delegation')}
-              >
-                Delegation
-              </button>
-            </div>
-
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
               <input
@@ -868,12 +776,11 @@ export default function QuickTask() {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-purple-200 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
-                disabled={loading || delegationLoading}
+                disabled={loading}
               />
             </div>
 
             <div className="flex gap-2" ref={dropdownRef}>
-              {/* Name Filter Dropdown */}
               <div className="relative">
                 <button
                   onClick={() => toggleDropdown('name')}
@@ -906,7 +813,6 @@ export default function QuickTask() {
                 )}
               </div>
 
-              {/* Frequency Filter Dropdown */}
               <div className="relative">
                 <button
                   onClick={() => toggleDropdown('frequency')}
@@ -943,519 +849,284 @@ export default function QuickTask() {
         </div>
       </div>
 
-      {currentUser && (
-        <>
-          {activeTab === 'checklist' ? (
-            <div className="mt-4 rounded-lg border border-purple-200 shadow-md bg-white overflow-hidden">
-              <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
-                <h2 className="text-purple-700 font-medium">
-                  {isAdmin ? 'All Unique Tasks' : 'My Unique Tasks'}
-                </h2>
-                <p className="text-purple-600 text-sm">
-                  {isAdmin ? 'Showing all unique tasks from checklist' : CONFIG.PAGE_CONFIG.description}
-                </p>
-              </div>
+      <div className="mt-4 rounded-lg border border-purple-200 shadow-md bg-white overflow-hidden">
+        <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
+          <h2 className="text-purple-700 font-medium">
+            {isAdmin ? 'All Unique Tasks' : 'My Unique Tasks'}
+          </h2>
+          <p className="text-purple-600 text-sm">
+            {isAdmin ? 'Showing all unique tasks from checklist' : CONFIG.PAGE_CONFIG.description}
+          </p>
+        </div>
 
-              {/* Submit Button */}
-              {selectedRows.size > 0 && (
-                <div className="mb-4 flex justify-end p-4 bg-blue-50 border-b">
-                  <button
-                    onClick={submitSelectedTasks}
-                    disabled={submitting}
-                    className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-md font-medium flex items-center gap-2"
+        {/* Action Buttons for Selected Rows */}
+        {selectedRows.size > 0 && isAdmin && (
+          <div className="mb-4 flex justify-end p-4 bg-blue-50 border-b">
+            <button
+              onClick={() => {
+                // Trigger bulk update logic if needed, or row-by-row
+                alert('Bulk update functionality coming soon or use individual save buttons.');
+              }}
+              disabled={submitting}
+              className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-md font-medium flex items-center gap-2"
+            >
+              {submitting ? 'Processing...' : `Action on ${selectedRows.size} Selected`}
+            </button>
+          </div>
+        )}
+
+        <div className="hidden sm:block overflow-x-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50 sticky top-0 z-20">
+              <tr>
+                {isAdmin && (
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedRows.size === filteredChecklistTasks.length && filteredChecklistTasks.length > 0}
+                        onChange={handleSelectAll}
+                        className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                      />
+                      <span className="ml-2">Action</span>
+                    </div>
+                  </th>
+                )}
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-green-50">
+                  Task ID
+                </th>
+                {[
+                  { key: 'Department', label: 'Department' },
+                  { key: 'Given By', label: 'Given By' },
+                  { key: 'Name', label: 'Name' },
+                  { key: 'Task Description', label: 'Task Description', minWidth: 'min-w-[300px]' },
+                  { key: 'End Date', label: 'End Date', bg: 'bg-yellow-50' },
+                  { key: 'Frequency', label: 'Frequency' },
+                  { key: 'Reminders', label: 'Reminders' },
+                  { key: 'Attachment', label: 'Attachment' },
+                ].map((column) => (
+                  <th
+                    key={column.label}
+                    className={`px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${column.bg || ''} ${column.minWidth || ''} ${column.key ? 'cursor-pointer hover:bg-gray-100' : ''}`}
+                    onClick={() => column.key && requestSort(column.key)}
                   >
-                    {submitting ? (
-                      <>
-                        <div className="inline-block animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
-                        Submitting...
-                      </>
-                    ) : (
-                      `Submit ${selectedRows.size} Selected Task${selectedRows.size === 1 ? '' : 's'}`
-                    )}
-                  </button>
-                </div>
-              )}
-
-              <div className="hidden sm:block overflow-x-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50 sticky top-0 z-20">
-                    <tr>
-                      {/* UPDATED: Only super_admin can see the Action column header */}
-                      {canAccessActionColumn && (
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          <div className="flex items-center">
-                            <input
-                              type="checkbox"
-                              checked={selectedRows.size === filteredChecklistTasks.length && filteredChecklistTasks.length > 0}
-                              onChange={handleSelectAll}
-                              className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
-                            />
-                            <span className="ml-2">Action</span>
-                          </div>
-                        </th>
+                    <div className="flex items-center">
+                      {column.label}
+                      {sortConfig.key === column.key && (
+                        <span className="ml-1">
+                          {sortConfig.direction === 'asc' ? '↑' : '↓'}
+                        </span>
                       )}
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-green-50">
-                        Task ID
-                      </th>
-                      {[
-                        { key: 'Department', label: 'Department' },
-                        { key: 'Given By', label: 'Given By' },
-                        { key: 'Name', label: 'Name' },
-                        { key: 'Task Description', label: 'Task Description', minWidth: 'min-w-[300px]' },
-                        { key: 'End Date', label: 'End Date', bg: 'bg-yellow-50' },
-                        { key: 'Frequency', label: 'Frequency' },
-                        { key: 'Reminders', label: 'Reminders' },
-                        { key: 'Attachment', label: 'Attachment' },
-                      ].map((column) => (
-                        <th
-                          key={column.label}
-                          className={`px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${column.bg || ''} ${column.minWidth || ''} ${column.key ? 'cursor-pointer hover:bg-gray-100' : ''}`}
-                          onClick={() => column.key && requestSort(column.key)}
-                        >
-                          <div className="flex items-center">
-                            {column.label}
-                            {sortConfig.key === column.key && (
-                              <span className="ml-1">
-                                {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                              </span>
-                            )}
-                          </div>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {loading ? (
-                      <tr>
-                        <td colSpan={9} className="px-6 py-8 text-center">
-                          <div className="flex flex-col items-center justify-center">
-                            <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500 mb-2"></div>
-                            <p className="text-purple-600">Loading Unique task...</p>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : filteredChecklistTasks.length > 0 ? (
-                      filteredChecklistTasks.map((task) => {
-                        const isEditing = editingRows.has(task._id);
-                        const editedTask = editedData[task._id] || task;
-                        const isSelected = selectedRows.has(task._id);
-
-                        return (
-                          <tr key={task._id} className={`hover:bg-gray-50 ${isEditing ? 'bg-blue-50' : ''}`}>
-                            {/* UPDATED: Only super_admin can see the Action column (checkbox & delete) */}
-                            {canAccessActionColumn && (
-                              <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                <div className="flex items-center gap-3">
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={() => handleRowSelection(task._id)}
-                                    className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
-                                  />
-                                  <div className="flex justify-center">
-                                    <button
-                                      onClick={() => handleDeleteTask(task)}
-                                      disabled={deleting === task._id}
-                                      className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                      title="Delete task"
-                                    >
-                                      {deleting === task._id ? (
-                                        <div className="h-4 w-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></div>
-                                      ) : (
-                                        <Trash2 className="h-4 w-4" />
-                                      )}
-                                    </button>
-                                  </div>
-                                </div>
-                              </td>
-                            )}
-                            {/* NEW Task ID column */}
-                            {/* Task ID column - display from sheet */}
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-green-50">
-                              {task['Task ID'] || 'N/A'}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={editedTask.Department || ''}
-                                  onChange={(e) => handleInputChange(task._id, 'Department', e.target.value)}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                />
-                              ) : (
-                                task.Department || "—"
-                              )}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={editedTask['Given By'] || ''}
-                                  onChange={(e) => handleInputChange(task._id, 'Given By', e.target.value)}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                />
-                              ) : (
-                                task['Given By'] || "—"
-                              )}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={editedTask.Name || ''}
-                                  onChange={(e) => handleInputChange(task._id, 'Name', e.target.value)}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                />
-                              ) : (
-                                task.Name || "—"
-                              )}
-                            </td>
-                            <td className="px-6 py-4 text-sm text-gray-500 min-w-[300px] max-w-[400px]">
-                              {isEditing ? (
-                                <textarea
-                                  value={editedTask['Task Description'] || ''}
-                                  onChange={(e) => handleInputChange(task._id, 'Task Description', e.target.value)}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                  rows={2}
-                                />
-                              ) : (
-                                <div className="whitespace-normal break-words">
-                                  {task['Task Description'] || "—"}
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 bg-yellow-50">
-                              {isEditing ? (
-                                <div className="flex gap-2 items-center">
-                                  <input
-                                    type="date"
-                                    value={editedTask['End Date'] ? editedTask['End Date'].split(' ')[0].split('/').reverse().join('-') : ''}
-                                    onChange={(e) => {
-                                      if (e.target.value) {
-                                        const [year, month, day] = e.target.value.split('-');
-                                        handleInputChange(task._id, 'End Date', `${day}/${month}/${year} 00:00:00`);
-                                      } else {
-                                        handleInputChange(task._id, 'End Date', '');
-                                      }
-                                    }}
-                                    className="px-2 py-1 border border-gray-300 rounded text-sm"
-                                  />
-                                  <input
-                                    type="time"
-                                    value={editedTask['End Date'] ? editedTask['End Date'].split(' ')[1] || '00:00' : '00:00'}
-                                    onChange={(e) => {
-                                      const dateStr = editedTask['End Date']?.split(' ')[0] || '';
-                                      if (dateStr) {
-                                        const [hours, minutes] = e.target.value.split(':');
-                                        handleInputChange(task._id, 'End Date', `${dateStr} ${hours}:${minutes}:00`);
-                                      }
-                                    }}
-                                    className="px-2 py-1 border border-gray-300 rounded text-sm"
-                                  />
-                                </div>
-                              ) : (
-                                formatDate(task['End Date']) || "—"
-                              )}
-                            </td>
-
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {isEditing ? (
-                                <select
-                                  value={editedTask.Frequency || ''}
-                                  onChange={(e) => handleInputChange(task._id, 'Frequency', e.target.value)}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                >
-                                  <option value="">Select Frequency</option>
-                                  <option value="Daily">Daily</option>
-                                  <option value="Weekly">Weekly</option>
-                                  <option value="Monthly">Monthly</option>
-                                </select>
-                              ) : (
-                                <span className={`px-2 py-1 rounded-full text-xs ${task.Frequency === 'Daily' ? 'bg-blue-100 text-blue-800' :
-                                  task.Frequency === 'Weekly' ? 'bg-green-100 text-green-800' :
-                                    task.Frequency === 'Monthly' ? 'bg-purple-100 text-purple-800' :
-                                      'bg-gray-100 text-gray-800'
-                                  }`}>
-                                  {task.Frequency || "—"}
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={editedTask.Reminders || ''}
-                                  onChange={(e) => handleInputChange(task._id, 'Reminders', e.target.value)}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                />
-                              ) : (
-                                task.Reminders || "—"
-                              )}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={editedTask.Attachment || ''}
-                                  onChange={(e) => handleInputChange(task._id, 'Attachment', e.target.value)}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                />
-                              ) : (
-                                task.Attachment || "—"
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    ) : (
-                      <tr>
-                        <td colSpan={9} className="px-6 py-4 text-center text-gray-500">
-                          {searchTerm || nameFilter || freqFilter
-                            ? "No tasks matching your filters"
-                            : isAdmin ? "No unique tasks available" : "No unique tasks assigned to you"}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Mobile card view - replace existing mobile section with this */}
-              <div className="sm:hidden space-y-4 p-4" style={{ maxHeight: 'calc(100vh - 220px)', overflowY: 'auto' }}>
-                {loading ? (
-                  <div className="text-center py-8">
+                    </div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {loading ? (
+                <tr>
+                  <td colSpan={isAdmin ? 10 : 9} className="px-6 py-8 text-center">
                     <div className="flex flex-col items-center justify-center">
                       <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500 mb-2"></div>
-                      <p className="text-purple-600">Loading Unique task...</p>
+                      <p className="text-purple-600">Loading Unique tasks...</p>
                     </div>
-                  </div>
-                ) : filteredChecklistTasks.length > 0 ? (
-                  <>
-                    {/* Select All Option - Mobile */}
-                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-3">
-                      <label className="flex items-center gap-3 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={selectedRows.size === filteredChecklistTasks.length && filteredChecklistTasks.length > 0}
-                          onChange={handleSelectAll}
-                          className="h-5 w-5 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
-                        />
-                        <span className="font-medium text-purple-700">
-                          Select All ({selectedRows.size}/{filteredChecklistTasks.length})
-                        </span>
-                      </label>
-                    </div>
+                  </td>
+                </tr>
+              ) : filteredChecklistTasks.length > 0 ? (
+                filteredChecklistTasks.map((task) => {
+                  const isEditing = editingRows.has(task._id);
+                  const editedTask = editedData[task._id] || task;
+                  const isSelected = selectedRows.has(task._id);
 
-                    {filteredChecklistTasks.map((task) => {
-                      const isEditing = editingRows.has(task._id);
-                      const editedTask = editedData[task._id] || task;
-                      const isSelected = selectedRows.has(task._id);
-
-                      return (
-                        <div key={task._id} className={`bg-white border rounded-lg p-4 shadow-sm ${isSelected ? 'border-purple-500 bg-purple-50' : 'border-gray-200'
-                          } ${isEditing ? 'ring-2 ring-blue-200' : ''}`}>
-                          {/* Checkbox at top of card */}
-                          <div className="flex items-center justify-between mb-3 pb-3 border-b border-gray-200">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => handleRowSelection(task._id)}
-                                className="h-5 w-5 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
-                              />
-                              <span className="font-medium text-gray-700">
-                                {isSelected ? 'Selected' : 'Select Task'}
-                              </span>
-                            </label>
-                            {isEditing && (
-                              <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
-                                Editing Mode
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="space-y-3">
-                            <div className="flex justify-between items-center border-b pb-2">
-                              <span className="font-medium text-gray-700">Department:</span>
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={editedTask.Department || ''}
-                                  onChange={(e) => handleInputChange(task._id, 'Department', e.target.value)}
-                                  className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
-                                />
-                              ) : (
-                                <div className="text-sm text-gray-900 break-words text-right w-[35%]">
-                                  {task.Department || "—"}
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex justify-between items-center border-b pb-2">
-                              <span className="font-medium text-gray-700">Given By:</span>
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={editedTask['Given By'] || ''}
-                                  onChange={(e) => handleInputChange(task._id, 'Given By', e.target.value)}
-                                  className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
-                                />
-                              ) : (
-                                <div className="text-sm text-gray-900 break-words text-right w-[35%]">
-                                  {task['Given By'] || "—"}
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex justify-between items-center border-b pb-2">
-                              <span className="font-medium text-gray-700">Name:</span>
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={editedTask.Name || ''}
-                                  onChange={(e) => handleInputChange(task._id, 'Name', e.target.value)}
-                                  className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
-                                />
-                              ) : (
-                                <div className="text-sm text-gray-900 break-words text-right w-[35%]">
-                                  {task.Name || "—"}
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex justify-between items-start border-b pb-2">
-                              <span className="font-medium text-gray-700">Task Description:</span>
-                              {isEditing ? (
-                                <textarea
-                                  value={editedTask['Task Description'] || ''}
-                                  onChange={(e) => handleInputChange(task._id, 'Task Description', e.target.value)}
-                                  className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
-                                  rows={2}
-                                />
-                              ) : (
-                                <div className="text-sm text-gray-900 break-words text-right w-[35%]">
-                                  {task['Task Description'] || "—"}
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex justify-between items-center border-b pb-2">
-                              <span className="font-medium text-gray-700">End Date:</span>
-                              {isEditing ? (
-                                <div className="flex gap-1 items-center w-[35%]">
-                                  <input
-                                    type="date"
-                                    value={editedTask['End Date'] ? editedTask['End Date'].split(' ')[0].split('/').reverse().join('-') : ''}
-                                    onChange={(e) => {
-                                      if (e.target.value) {
-                                        const [year, month, day] = e.target.value.split('-');
-                                        handleInputChange(task._id, 'End Date', `${day}/${month}/${year} 00:00:00`);
-                                      } else {
-                                        handleInputChange(task._id, 'End Date', '');
-                                      }
-                                    }}
-                                    className="px-2 py-1 border border-gray-300 rounded text-sm"
-                                  />
-                                  <input
-                                    type="time"
-                                    value={editedTask['End Date'] ? editedTask['End Date'].split(' ')[1] || '00:00' : '00:00'}
-                                    onChange={(e) => {
-                                      const dateStr = editedTask['End Date']?.split(' ')[0] || '';
-                                      if (dateStr) {
-                                        const [hours, minutes] = e.target.value.split(':');
-                                        handleInputChange(task._id, 'End Date', `${dateStr} ${hours}:${minutes}:00`);
-                                      }
-                                    }}
-                                    className="px-2 py-1 border border-gray-300 rounded text-sm"
-                                  />
-                                </div>
-                              ) : (
-                                <div className="text-sm text-gray-900 break-words bg-yellow-50 px-2 py-1 rounded text-right w-[35%]">
-                                  {formatDate(task['End Date']) || "—"}
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex justify-between items-center border-b pb-2">
-                              <span className="font-medium text-gray-700">Frequency:</span>
-                              {isEditing ? (
-                                <select
-                                  value={editedTask.Frequency || ''}
-                                  onChange={(e) => handleInputChange(task._id, 'Frequency', e.target.value)}
-                                  className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
+                  return (
+                    <tr key={task._id} className={`hover:bg-gray-50 ${isEditing ? 'bg-blue-50' : ''}`}>
+                      {isAdmin && (
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleRowSelection(task._id)}
+                              className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                            />
+                            <div className="flex gap-2">
+                              {isEditing && (
+                                <button
+                                  onClick={() => handleUpdateRow(task._id)}
+                                  disabled={submitting}
+                                  className="p-1 text-green-600 hover:text-green-800 hover:bg-green-50 rounded transition-colors"
+                                  title="Update Task"
                                 >
-                                  <option value="">Select Frequency</option>
-                                  <option value="Daily">Daily</option>
-                                  <option value="Weekly">Weekly</option>
-                                  <option value="Monthly">Monthly</option>
-                                </select>
-                              ) : (
-                                <span className={`px-2 py-1 rounded-full text-xs ${task.Frequency === 'Daily' ? 'bg-blue-100 text-blue-800' :
-                                  task.Frequency === 'Weekly' ? 'bg-green-100 text-green-800' :
-                                    task.Frequency === 'Monthly' ? 'bg-purple-100 text-purple-800' :
-                                      'bg-gray-100 text-gray-800'
-                                  }`}>
-                                  {task.Frequency || "—"}
-                                </span>
+                                  {submitting ? (
+                                    <div className="h-4 w-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
+                                  ) : (
+                                    <Save className="h-4 w-4" />
+                                  )}
+                                </button>
                               )}
-                            </div>
-                            <div className="flex justify-between items-center border-b pb-2">
-                              <span className="font-medium text-gray-700">Reminders:</span>
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={editedTask.Reminders || ''}
-                                  onChange={(e) => handleInputChange(task._id, 'Reminders', e.target.value)}
-                                  className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
-                                />
-                              ) : (
-                                <div className="text-sm text-gray-900 break-words text-right w-[35%]">
-                                  {task.Reminders || "—"}
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <span className="font-medium text-gray-700">Attachment:</span>
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={editedTask.Attachment || ''}
-                                  onChange={(e) => handleInputChange(task._id, 'Attachment', e.target.value)}
-                                  className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
-                                />
-                              ) : (
-                                <div className="text-sm text-gray-900 break-words text-right w-[35%]">
-                                  {task.Attachment || "—"}
-                                </div>
-                              )}
+                              <button
+                                onClick={() => handleDeleteTask(task)}
+                                disabled={deleting === task._id}
+                                className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
+                                title="Delete Task"
+                              >
+                                {deleting === task._id ? (
+                                  <div className="h-4 w-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></div>
+                                ) : (
+                                  <Trash2 className="h-4 w-4" />
+                                )}
+                              </button>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </>
-                ) : (
-                  <div className="text-center text-gray-500 py-8">
-                    {searchTerm || nameFilter || freqFilter
-                      ? "No tasks matching your filters"
-                      : isAdmin ? "No unique tasks available" : "No unique tasks assigned to you"}
-                  </div>
+                        </td>
+                      )}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-green-50">
+                        {task['Task ID'] || 'N/A'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={editedTask.Department || ''}
+                            onChange={(e) => handleInputChange(task._id, 'Department', e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                          />
+                        ) : (
+                          task.Department || "—"
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={editedTask['Given By'] || ''}
+                            onChange={(e) => handleInputChange(task._id, 'Given By', e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                          />
+                        ) : (
+                          task['Given By'] || "—"
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={editedTask.Name || ''}
+                            onChange={(e) => handleInputChange(task._id, 'Name', e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                          />
+                        ) : (
+                          task.Name || "—"
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-500 min-w-[300px] max-w-[400px]">
+                        {isEditing ? (
+                          <textarea
+                            value={editedTask['Task Description'] || ''}
+                            onChange={(e) => handleInputChange(task._id, 'Task Description', e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                            rows={2}
+                          />
+                        ) : (
+                          <div className="whitespace-normal break-words">
+                            {task['Task Description'] || "—"}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 bg-yellow-50">
+                        {isEditing ? (
+                          <div className="flex gap-2 items-center">
+                            <input
+                              type="date"
+                              value={editedTask['End Date'] ? editedTask['End Date'].split(' ')[0].split('/').reverse().join('-') : ''}
+                              onChange={(e) => {
+                                if (e.target.value) {
+                                  const [year, month, day] = e.target.value.split('-');
+                                  handleInputChange(task._id, 'End Date', `${day}/${month}/${year} 00:00:00`);
+                                }
+                              }}
+                              className="px-2 py-1 border border-gray-300 rounded text-sm"
+                            />
+                          </div>
+                        ) : (
+                          formatDate(task['End Date']) || "—"
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {isEditing ? (
+                          <select
+                            value={editedTask.Frequency || ''}
+                            onChange={(e) => handleInputChange(task._id, 'Frequency', e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                          >
+                            <option value="">Frequency</option>
+                            <option value="Daily">Daily</option>
+                            <option value="Weekly">Weekly</option>
+                            <option value="Monthly">Monthly</option>
+                          </select>
+                        ) : (
+                          <span className={`px-2 py-1 rounded-full text-xs ${task.Frequency === 'Daily' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100'}`}>
+                            {task.Frequency || "—"}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={editedTask.Reminders || ''}
+                            onChange={(e) => handleInputChange(task._id, 'Reminders', e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                          />
+                        ) : (
+                          task.Reminders || "—"
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={editedTask.Attachment || ''}
+                            onChange={(e) => handleInputChange(task._id, 'Attachment', e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                          />
+                        ) : (
+                          task.Attachment || "—"
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={isAdmin ? 10 : 9} className="px-6 py-4 text-center text-gray-500">
+                    No unique tasks found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile View */}
+        <div className="sm:hidden space-y-4 p-4">
+          {filteredChecklistTasks.map((task) => (
+            <div key={task._id} className="bg-white border rounded-lg p-4 shadow-sm border-gray-200">
+              <div className="flex justify-between items-center mb-2">
+                <span className="font-bold text-purple-700">{task['Task ID']}</span>
+                {isAdmin && (
+                  <button onClick={() => handleDeleteTask(task)} className="text-red-500"><Trash2 className="h-5 w-5" /></button>
                 )}
               </div>
+              <div className="text-sm space-y-1">
+                <p><span className="font-medium">Name:</span> {task.Name}</p>
+                <p><span className="font-medium">Desc:</span> {task['Task Description']}</p>
+                <p><span className="font-medium">Date:</span> {formatDate(task['End Date'])}</p>
+              </div>
             </div>
-          ) : (
-            <DelegationPage
-              searchTerm={searchTerm}
-              nameFilter={nameFilter}
-              freqFilter={freqFilter}
-              setNameFilter={setNameFilter}
-              setFreqFilter={setFreqFilter}
-              currentUser={currentUser}
-              userRole={userRole}
-              CONFIG={CONFIG}
-              delegationTasks={delegationTasks}
-              delegationLoading={delegationLoading}
-              loading={delegationLoading}
-            />
-          )}
-        </>
-      )
-      }
-    </AdminLayout >
+          ))}
+        </div>
+      </div>
+    </AdminLayout>
   );
 }

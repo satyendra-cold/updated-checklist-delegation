@@ -158,13 +158,6 @@ export default function AdminLayout({ children, darkMode, toggleDarkMode }) {
       showFor: ["admin", "super_admin", "superadmin", "user"],
     },
     {
-      href: "/dashboard/license",
-      label: "License",
-      icon: KeyRound,
-      active: location.pathname === "/dashboard/license",
-      showFor: ["admin", "super_admin", "superadmin", "user"],
-    },
-    {
       href: "/dashboard/settings",
       label: "Settings",
       icon: Settings,
@@ -183,6 +176,13 @@ export default function AdminLayout({ children, darkMode, toggleDarkMode }) {
       label: "Training Video",
       icon: Video,
       active: location.pathname === "/dashboard/traning-video",
+      showFor: ["admin", "super_admin", "superadmin", "user"],
+    },
+    {
+      href: "/dashboard/license",
+      label: "License",
+      icon: KeyRound,
+      active: location.pathname === "/dashboard/license",
       showFor: ["admin", "super_admin", "superadmin", "user"],
     },
   ];

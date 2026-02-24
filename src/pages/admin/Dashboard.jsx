@@ -102,22 +102,27 @@ export default function AdminDashboard() {
       );
     } else if (type === 'pending') {
       if (dashboardType === 'delegation') {
-        filteredTasks = departmentData.allTasks.filter(task => {
-          if (task.status === 'completed') return false;
-          return true;
-        });
+        filteredTasks = departmentData.allTasks.filter(task =>
+          task.status === 'pending'
+        );
       } else {
         filteredTasks = departmentData.allTasks.filter(task =>
           task.status !== 'completed'
         );
       }
     } else if (type === 'overdue') {
-      filteredTasks = departmentData.allTasks.filter(task => {
-        if (task.status === 'completed') return false;
-        const taskDate = parseDateFromDDMMYYYY(task.taskStartDate);
-        if (!taskDate) return false;
-        return taskDate < today;
-      });
+      if (dashboardType === 'delegation') {
+        filteredTasks = departmentData.allTasks.filter(task =>
+          task.status === 'overdue'
+        );
+      } else {
+        filteredTasks = departmentData.allTasks.filter(task => {
+          if (task.status === 'completed') return false;
+          const taskDate = parseDateFromDDMMYYYY(task.taskStartDate);
+          if (!taskDate) return false;
+          return taskDate < today;
+        });
+      }
     } else if (type === 'notDone') {
       filteredTasks = departmentData.allTasks.filter(task => {
         const statusColumnValue = task.notDoneStatus;
@@ -382,8 +387,8 @@ export default function AdminDashboard() {
   }
 
   // Modified fetch function to support both checklist and delegation
-  const fetchDepartmentData = async () => {
-    const sheetName = dashboardType === "delegation" ? "DELEGATION" : "Checklist";
+  const fetchDepartmentData = async (signal) => {
+    const sheetName = dashboardType === "delegation" ? "Delegation" : "Checklist";
 
     try {
       console.log(`Fetching data for dashboard type: ${dashboardType}, sheet: ${sheetName}`);
@@ -393,6 +398,7 @@ export default function AdminDashboard() {
       const response = await fetch(`${scriptUrl}?sheet=${sheetName}`, {
         method: 'GET',
         redirect: 'follow',
+        signal: signal,
       });
 
       console.log("Response status:", response.status);
@@ -418,6 +424,8 @@ export default function AdminDashboard() {
         const jsonString = text.substring(jsonStart, jsonEnd + 1);
         data = JSON.parse(jsonString);
       }
+
+      if (signal && signal.aborted) return;
 
       if (!data || !data.table || !data.table.rows) {
         throw new Error('Invalid data structure received from Google Sheets');
@@ -537,14 +545,36 @@ export default function AdminDashboard() {
         const taskDescription = getCellValue(row, 5) || 'Untitled Task';
         const frequency = getCellValue(row, 7) || 'one-time';
 
+        const delegationStatusRaw = dashboardType === "delegation" ? String(getCellValue(row, 20) || "").trim() : "";
+        const delegationStatus = delegationStatusRaw.toLowerCase();
         let status = 'pending';
 
-        if (completionDate && completionDate !== '') {
-          status = 'completed';
-        } else if (isDateInPast(taskStartDate) && !isDateToday(taskStartDate)) {
-          status = 'overdue';
+        if (dashboardType === "delegation") {
+          if (delegationStatus === "done") {
+            status = 'completed';
+          } else if (delegationStatus === "verify pending") {
+            status = 'overdue';
+          } else if (delegationStatus === "planned" || delegationStatus === "pending") {
+            status = 'pending';
+          } else {
+            // Fallback to original logic if Column U is empty or has unknown values
+            if (completionDate && completionDate !== '') {
+              status = 'completed';
+            } else if (isDateInPast(taskStartDate) && !isDateToday(taskStartDate)) {
+              status = 'overdue';
+            } else {
+              status = 'pending';
+            }
+          }
         } else {
-          status = 'pending';
+          // Standard checklist logic
+          if (completionDate && completionDate !== '') {
+            status = 'completed';
+          } else if (isDateInPast(taskStartDate) && !isDateToday(taskStartDate)) {
+            status = 'overdue';
+          } else {
+            status = 'pending';
+          }
         }
 
         const department = getCellValue(row, 2) || "";
@@ -570,19 +600,21 @@ export default function AdminDashboard() {
         if (dashboardType === "delegation") {
           totalTasks++;
 
+          // Card counts for Delegation based on Column U (Index 20)
+          if (delegationStatus === "done") {
+            completedRatingOne++;
+          } else if (delegationStatus === "planned" || delegationStatus === "pending") {
+            completedRatingTwo++;
+          } else if (delegationStatus === "verify pending") {
+            completedRatingThreePlus++;
+          }
+
           if (status === 'completed') {
             completedTasks++;
             if (staffData) staffData.completedTasks++;
             statusData.Completed++;
 
-            const ratingValue = getCellValue(row, 17);
-            if (ratingValue === 1) {
-              completedRatingOne++;
-            } else if (ratingValue === 2) {
-              completedRatingTwo++;
-            } else if (ratingValue > 2) {
-              completedRatingThreePlus++;
-            }
+            // Rating-based logic replaced by Column U logic above
 
             const completedMonth = parseDateFromDDMMYYYY(completionDate);
             if (completedMonth) {
@@ -594,7 +626,7 @@ export default function AdminDashboard() {
           } else {
             if (staffData) staffData.pendingTasks++;
 
-            if (isDateInPast(taskStartDate) && !isDateToday(taskStartDate)) {
+            if (status === 'overdue') {
               overdueTasks++;
               statusData.Overdue++;
             }
@@ -695,6 +727,8 @@ export default function AdminDashboard() {
         });
       }
 
+      if (signal && signal.aborted) return;
+
       setDepartmentData({
         allTasks: processedRows,
         staffMembers,
@@ -713,8 +747,11 @@ export default function AdminDashboard() {
       console.log("Department data updated successfully");
 
     } catch (error) {
+      if (error.name === 'AbortError') return;
       console.error(`Error fetching ${sheetName} sheet data:`, error);
       console.error("Error details:", error.message);
+
+      if (signal && signal.aborted) return;
 
       setDepartmentData({
         allTasks: [],
@@ -734,7 +771,9 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
-    fetchDepartmentData();
+    const controller = new AbortController();
+    fetchDepartmentData(controller.signal);
+    return () => controller.abort();
   }, [dashboardType, isAdmin, username]);
 
   // When dashboard loads, set current date
@@ -1094,7 +1133,7 @@ export default function AdminDashboard() {
           <div className="rounded-lg border border-l-4 border-l-green-500 shadow-md hover:shadow-lg transition-all bg-white" onClick={() => handleCardClick('completed')}>
             <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-gradient-to-r from-green-50 to-green-100 rounded-tr-lg p-4">
               <h3 className="text-sm font-medium text-green-700">
-                {dashboardType === "delegation" ? "Completed Once" : "Completed Tasks"}
+                {dashboardType === "delegation" ? "Completed Task" : "Completed Tasks"}
               </h3>
               <CheckCircle2 className="h-4 w-4 text-green-500" />
             </div>
@@ -1111,7 +1150,7 @@ export default function AdminDashboard() {
           <div className="rounded-lg border border-l-4 border-l-amber-500 shadow-md hover:shadow-lg transition-all bg-white" onClick={() => handleCardClick('pending')}>
             <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-gradient-to-r from-amber-50 to-amber-100 rounded-tr-lg p-4">
               <h3 className="text-sm font-medium text-amber-700">
-                {dashboardType === "delegation" ? "Completed Twice" : "Pending Tasks"}
+                {dashboardType === "delegation" ? "Pending" : "Pending Tasks"}
               </h3>
               {dashboardType === "delegation" ? (
                 <CheckCircle2 className="h-4 w-4 text-amber-500" />
@@ -1132,7 +1171,7 @@ export default function AdminDashboard() {
           <div className="rounded-lg border border-l-4 border-l-red-500 shadow-md hover:shadow-lg transition-all bg-white" onClick={() => handleCardClick('overdue')}>
             <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-gradient-to-r from-red-50 to-red-100 rounded-tr-lg p-4">
               <h3 className="text-sm font-medium text-red-700">
-                {dashboardType === "delegation" ? "Completed 3+ Times" : "Overdue Tasks"}
+                {dashboardType === "delegation" ? "Verify Pending" : "Overdue Tasks"}
               </h3>
               {dashboardType === "delegation" ? (
                 <CheckCircle2 className="h-4 w-4 text-red-500" />
@@ -1526,17 +1565,17 @@ export default function AdminDashboard() {
                           <div className="text-xs text-red-600 mt-1">Past due dates only (excluding today)</div>
                         </div>
                         <div className="bg-white p-3 rounded-lg border border-green-200">
-                          <div className="text-sm font-medium text-green-700">Completed Once</div>
+                          <div className="text-sm font-medium text-green-700">Completed Task</div>
                           <div className="text-2xl font-bold text-green-600">{departmentData.completedRatingOne}</div>
                           <div className="text-xs text-green-600 mt-1">Tasks with rating 1</div>
                         </div>
                         <div className="bg-white p-3 rounded-lg border border-amber-200">
-                          <div className="text-sm font-medium text-amber-700">Completed Twice</div>
+                          <div className="text-sm font-medium text-amber-700">Pending</div>
                           <div className="text-2xl font-bold text-amber-600">{departmentData.completedRatingTwo}</div>
                           <div className="text-xs text-amber-600 mt-1">Tasks with rating 2</div>
                         </div>
                         <div className="bg-white p-3 rounded-lg border border-red-200">
-                          <div className="text-sm font-medium text-red-700">Completed 3+ Times</div>
+                          <div className="text-sm font-medium text-red-700">Extended Date</div>
                           <div className="text-2xl font-bold text-red-600">{departmentData.completedRatingThreePlus}</div>
                           <div className="text-xs text-red-600 mt-1">Tasks with rating 3 or higher</div>
                         </div>

@@ -22,7 +22,7 @@ const CONFIG = {
   APPS_SCRIPT_URL:
     "https://script.google.com/macros/s/AKfycbyGf3LdYk6MPiOs_shPU9_AW7wmRjJZ4QxMk9qYqTScsDMB7IliaWRB1HueYy7w5qxqNw/exec",
   // Google Drive folder ID for file uploads
-  DRIVE_FOLDER_ID: "1mocSXHZWgUBRpRCpOS_-1L-f0CcVJcl_",
+  DRIVE_FOLDER_ID: "1AjwjncgcqqZFs9tzguD6Y88GIuJvx5_1",
   // Sheet name to work with
   SHEET_NAME: "Checklist",
   // Page configuration
@@ -69,6 +69,7 @@ function AccountDataPage() {
   const [savingEdits, setSavingEdits] = useState(new Set());
 
   const [buddyTaskFilter, setBuddyTaskFilter] = useState(""); // Selected buddy name
+  const [statusFilter, setStatusFilter] = useState(""); // Selected status filter (Overdue, Today, Upcoming)
   const [assignedPersons, setAssignedPersons] = useState([]); // List from sessionStorage
   const [currentCaptureId, setCurrentCaptureId] = useState(null);
   // Ye states already hai aapke code me (around line 50-60), check karo ye sab exist karte hai:
@@ -470,6 +471,7 @@ function AccountDataPage() {
     setSelectedMembers([]);
     setStartDate("");
     setEndDate("");
+    setStatusFilter("");
   };
 
   // NEW: Edit functionality functions
@@ -734,7 +736,7 @@ function AccountDataPage() {
 
   // Memoized filtered data to prevent unnecessary re-renders
   const filteredAccountData = useMemo(() => {
-    const filtered = searchTerm
+    let filtered = searchTerm
       ? accountData.filter((account) =>
         Object.values(account).some(
           (value) =>
@@ -744,6 +746,28 @@ function AccountDataPage() {
       )
       : accountData;
 
+    // Apply Status Filter (Overdue, Today, Upcoming)
+    if (statusFilter) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      filtered = filtered.filter((account) => {
+        const taskDate = parseDateFromDDMMYYYY(account["col6"]);
+        if (!taskDate) return false;
+
+        taskDate.setHours(0, 0, 0, 0);
+
+        if (statusFilter === "Overdue") {
+          return taskDate < today;
+        } else if (statusFilter === "Today") {
+          return taskDate.getTime() === today.getTime();
+        } else if (statusFilter === "Upcoming") {
+          return taskDate > today;
+        }
+        return true;
+      });
+    }
+
     // Frontend-only: hide tasks whose Remarks (col13) contain "leave" — no sheet changes
     const withoutLeave = filtered.filter((account) => {
       const remarks = String(account["col13"] || "").trim().toLowerCase();
@@ -751,7 +775,7 @@ function AccountDataPage() {
     });
 
     return withoutLeave.sort(sortDateWise);
-  }, [accountData, searchTerm]);
+  }, [accountData, searchTerm, statusFilter]);
 
   const filteredHistoryData = useMemo(() => {
     return historyData
@@ -1283,6 +1307,25 @@ function AccountDataPage() {
           </h1>
 
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 w-full sm:w-auto">
+            {/* Status Filter */}
+            <div className="relative w-full sm:w-48">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="w-full px-3 py-2 border border-purple-200 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm appearance-none bg-white cursor-pointer"
+              >
+                <option value="">All Tasks</option>
+                <option value="Overdue">Overdue</option>
+                <option value="Today">Today</option>
+                <option value="Upcoming">Upcoming</option>
+              </select>
+              <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none text-gray-400">
+                <svg className="h-4 w-4 fill-current" viewBox="0 0 20 20">
+                  <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
+                </svg>
+              </div>
+            </div>
+
             {/* Search box */}
             <div className="relative w-full sm:w-64">
               <Search
@@ -2284,21 +2327,17 @@ function AccountDataPage() {
                             <td className={`px-6 py-4 min-w-[150px] ${!account["col17"] ? "bg-orange-50" : ""}`}>
                               {account.image ? (
                                 // ✅ SHOW UPLOADED IMAGE
+                                // ✅ SHOW UPLOADED IMAGE STATUS ONLY (NO PREVIEW)
                                 <div className="flex items-center">
-                                  <img
-                                    src={typeof account.image === "string" ? account.image : URL.createObjectURL(account.image)}
-                                    alt="Receipt"
-                                    className="h-10 w-10 object-cover rounded-md mr-2 flex-shrink-0"
-                                  />
                                   <div className="flex flex-col min-w-0">
-                                    <span className="text-xs text-gray-500 break-words">
-                                      {account.image instanceof File ? account.image.name : "Uploaded"}
+                                    <span className="text-sm font-medium text-gray-900 break-words">
+                                      {account.image instanceof File ? account.image.name : "Image Selected"}
                                     </span>
                                     {account.image instanceof File ? (
-                                      <span className="text-xs text-green-600">Ready to upload</span>
+                                      <span className="text-xs text-green-600 font-semibold">Ready to upload</span>
                                     ) : (
                                       <button
-                                        className="text-xs text-purple-600 hover:text-purple-800 break-words"
+                                        className="text-xs text-purple-600 hover:text-purple-800 break-words underline mt-1"
                                         onClick={() => window.open(account.image, "_blank")}
                                       >
                                         View Image
@@ -2575,28 +2614,20 @@ function AccountDataPage() {
 
                             {account.image ? (
                               // ✅ SHOW UPLOADED IMAGE
+                              // ✅ SHOW UPLOADED IMAGE STATUS ONLY (NO PREVIEW)
                               <div className="flex items-center mt-2">
-                                <img
-                                  src={
-                                    typeof account.image === "string"
-                                      ? account.image
-                                      : URL.createObjectURL(account.image)
-                                  }
-                                  alt="Receipt"
-                                  className="h-12 w-12 object-cover rounded-md mr-3"
-                                />
                                 <div className="flex flex-col">
-                                  <span className="text-sm text-gray-700 font-medium">
-                                    {account.image instanceof File ? account.image.name : "Uploaded Image"}
+                                  <span className="text-sm text-gray-900 font-semibold">
+                                    {account.image instanceof File ? account.image.name : "Image Selected"}
                                   </span>
                                   {account.image instanceof File ? (
-                                    <span className="text-xs text-green-600">✓ Ready to upload</span>
+                                    <span className="text-xs text-green-600 font-bold">✓ Ready to upload</span>
                                   ) : (
                                     <button
-                                      className="text-xs text-purple-600 hover:text-purple-800 text-left"
+                                      className="text-xs text-purple-600 hover:text-purple-800 text-left underline mt-1"
                                       onClick={() => window.open(account.image, "_blank")}
                                     >
-                                      View Full Image →
+                                      View Image →
                                     </button>
                                   )}
                                 </div>

@@ -6,8 +6,9 @@ import { isSuperAdmin } from '../utils/authUtils'
 
 // Configuration
 const CONFIG = {
-    SHEET_ID: "1YCLFppf8OrwZjKjhVyVB77s63vFQUylXzEniWLeatW0/",
-    SHEET_NAME: "Working Day Calendar",
+    SHEET_ID: "1YCLFppf8OrwZjKjhVyVB77s63vFQUylXzEniWLeatW0",
+    WORKING_DAY_SHEET: "Working Day Calendar",
+    HOLIDAY_SHEET: "Holiday List",
     APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbyGf3LdYk6MPiOs_shPU9_AW7wmRjJZ4QxMk9qYqTScsDMB7IliaWRB1HueYy7w5qxqNw/exec"
 }
 
@@ -82,88 +83,90 @@ function Holidays() {
             setLoading(true)
             setError(null)
 
-            const response = await fetch(`${CONFIG.APPS_SCRIPT_URL}?sheet=${encodeURIComponent(CONFIG.SHEET_NAME)}&action=fetch`)
+            // Dynamic fetch function for different sheets
+            const fetchFromSheet = async (sheetName) => {
+                const response = await fetch(`${CONFIG.APPS_SCRIPT_URL}?sheet=${encodeURIComponent(sheetName)}&action=fetch`)
+                if (!response.ok) throw new Error(`Failed to fetch from ${sheetName}`)
 
-            if (!response.ok) throw new Error("Failed to fetch from Apps Script")
+                const responseText = await response.text()
+                let parsedData;
 
-            const responseText = await response.text()
-            let parsedData;
-
-            try {
-                parsedData = JSON.parse(responseText)
-            } catch (parseError) {
-                // Robust JSON extraction if response is wrapped
-                const jsonStart = responseText.indexOf("{")
-                const jsonEnd = responseText.lastIndexOf("}")
-                if (jsonStart !== -1 && jsonEnd !== -1) {
-                    parsedData = JSON.parse(responseText.substring(jsonStart, jsonEnd + 1))
-                } else {
-                    throw new Error("Invalid JSON response from server")
+                try {
+                    parsedData = JSON.parse(responseText)
+                } catch (parseError) {
+                    const jsonStart = responseText.indexOf("{")
+                    const jsonEnd = responseText.lastIndexOf("}")
+                    if (jsonStart !== -1 && jsonEnd !== -1) {
+                        parsedData = JSON.parse(responseText.substring(jsonStart, jsonEnd + 1))
+                    } else {
+                        throw new Error(`Invalid JSON response for ${sheetName}`)
+                    }
                 }
+
+                let rows = []
+                if (parsedData.table && parsedData.table.rows) {
+                    rows = parsedData.table.rows
+                } else if (Array.isArray(parsedData)) {
+                    rows = parsedData
+                } else if (parsedData.values) {
+                    rows = parsedData.values.map(r => ({ c: r.map(v => ({ v: v })) }))
+                }
+                return rows
             }
 
-            let rows = []
-            if (parsedData.table && parsedData.table.rows) {
-                rows = parsedData.table.rows
-            } else if (Array.isArray(parsedData)) {
-                rows = parsedData
-            } else if (parsedData.values) {
-                rows = parsedData.values.map(r => ({ c: r.map(v => ({ v: v })) }))
-            }
+            // Fetch both sheets in parallel
+            const [workingDayRows, holidayRows] = await Promise.all([
+                fetchFromSheet(CONFIG.WORKING_DAY_SHEET),
+                fetchFromSheet(CONFIG.HOLIDAY_SHEET)
+            ])
 
-            if (rows.length > 0) {
-                const dataRows = rows.slice(1) // Skip header row
+            // Process Working Days (Columns A-D: 0-3)
+            const workingDays = workingDayRows.slice(1).map((row, index) => {
+                let rowValues = []
+                if (row.c) {
+                    rowValues = row.c.map(cell => cell && cell.v !== undefined ? cell.v : "")
+                } else if (Array.isArray(row)) {
+                    rowValues = row
+                }
 
-                const workingDays = []
-                const holidays = []
+                if (rowValues.length === 0) return null
 
-                dataRows.forEach((row, index) => {
-                    let rowValues = []
-                    if (row.c) {
-                        rowValues = row.c.map(cell => cell && cell.v !== undefined ? cell.v : "")
-                    } else if (Array.isArray(row)) {
-                        rowValues = row
-                    }
+                return {
+                    _id: `working_${index}`,
+                    _rowIndex: index + 2,
+                    workingDate: formatDate(rowValues[0]),
+                    day: rowValues[1] || "",
+                    weekNum: rowValues[2] || "",
+                    month: rowValues[3] || ""
+                }
+            }).filter(d => d && (d.workingDate || d.day))
 
-                    // Working Days: Columns A-D (indices 0-3)
-                    const workingDate = rowValues[0] || ""
-                    const workingDay = rowValues[1] || ""
-                    const weekNum = rowValues[2] || ""
-                    const month = rowValues[3] || ""
+            // Process Holidays (Columns A-C: 0-2 from Holiday List sheet)
+            const holidays = holidayRows.slice(1).map((row, index) => {
+                let rowValues = []
+                if (row.c) {
+                    rowValues = row.c.map(cell => cell && cell.v !== undefined ? cell.v : "")
+                } else if (Array.isArray(row)) {
+                    rowValues = row
+                }
 
-                    if (workingDate || workingDay || weekNum || month) {
-                        workingDays.push({
-                            _id: `working_${index}`,
-                            _rowIndex: index + 2,
-                            workingDate: formatDate(workingDate),
-                            day: workingDay,
-                            weekNum: weekNum,
-                            month: month
-                        })
-                    }
+                if (rowValues.length === 0) return null
 
-                    // Holidays: Columns E-G (indices 4-6)
-                    const holidayDate = rowValues[4] || ""
-                    const holidayDay = rowValues[5] || ""
-                    const holidayReason = rowValues[6] || ""
+                return {
+                    _id: `holiday_${index}`,
+                    _rowIndex: index + 2,
+                    date: formatDate(rowValues[0]),
+                    day: rowValues[1] || "",
+                    reason: rowValues[2] || ""
+                }
+            }).filter(h => h && (h.date || h.reason))
 
-                    if (holidayDate || holidayDay || holidayReason) {
-                        holidays.push({
-                            _id: `holiday_${index}`,
-                            _rowIndex: index + 2,
-                            date: formatDate(holidayDate),
-                            day: holidayDay,
-                            reason: holidayReason
-                        })
-                    }
-                })
+            setWorkingDaysData(workingDays)
+            setHolidaysData(holidays)
 
-                setWorkingDaysData(workingDays)
-                setHolidaysData(holidays)
-            }
         } catch (err) {
             console.error("Error fetching data:", err)
-            setError("Failed to load data. Please try again.")
+            setError("Failed to load data. Please check your network or spreadsheet.")
         } finally {
             setLoading(false)
         }
@@ -263,7 +266,7 @@ function Holidays() {
 
             const formData = new FormData()
             formData.append('action', 'insertWorkingDay')
-            formData.append('sheetName', CONFIG.SHEET_NAME)
+            formData.append('sheetName', CONFIG.WORKING_DAY_SHEET)
             formData.append('rowData', JSON.stringify(rowData))
 
             const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
@@ -309,7 +312,7 @@ function Holidays() {
 
             const formData = new FormData()
             formData.append('action', 'insertHoliday')
-            formData.append('sheetName', CONFIG.SHEET_NAME)
+            formData.append('sheetName', CONFIG.HOLIDAY_SHEET)
             formData.append('rowData', JSON.stringify(rowData))
 
             const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
@@ -442,15 +445,15 @@ function Holidays() {
                                         </div>
 
                                         {/* Working Days Table */}
-                                        <div className="overflow-x-auto">
-                                            <table className="w-full">
-                                                <thead>
+                                        <div className="overflow-auto max-h-[calc(100vh-350px)] border rounded-lg">
+                                            <table className="w-full border-separate border-spacing-0">
+                                                <thead className="sticky top-0 z-10">
                                                     <tr className="bg-gradient-to-r from-blue-50 to-purple-50">
-                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b">S.No</th>
-                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b">Working Dates</th>
-                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b">Day</th>
-                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b">Week Num</th>
-                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b">Month</th>
+                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b bg-inherit">S.No</th>
+                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b bg-inherit">Working Dates</th>
+                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b bg-inherit">Day</th>
+                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b bg-inherit">Week Num</th>
+                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b bg-inherit">Month</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -493,14 +496,14 @@ function Holidays() {
                                         </div>
 
                                         {/* Holidays Table */}
-                                        <div className="overflow-x-auto">
-                                            <table className="w-full">
-                                                <thead>
+                                        <div className="overflow-auto max-h-[calc(100vh-350px)] border rounded-lg">
+                                            <table className="w-full border-separate border-spacing-0">
+                                                <thead className="sticky top-0 z-10">
                                                     <tr className="bg-gradient-to-r from-blue-50 to-purple-50">
-                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b">S.No</th>
-                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b">Date</th>
-                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b">Day</th>
-                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b">Holiday (Reason)</th>
+                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b bg-inherit">S.No</th>
+                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b bg-inherit">Date</th>
+                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b bg-inherit">Day</th>
+                                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b bg-inherit">Holiday (Reason)</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>

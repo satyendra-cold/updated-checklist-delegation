@@ -200,26 +200,20 @@ export default function AssignTask() {
   // Function to fetch options from master sheet
   const fetchMasterSheetOptions = async () => {
     try {
-      const masterSheetId = "1YCLFppf8OrwZjKjhVyVB77s63vFQUylXzEniWLeatW0/";
-      const masterSheetName = "master";
+      const appsScriptUrl = "https://script.google.com/macros/s/AKfycbyGf3LdYk6MPiOs_shPU9_AW7wmRjJZ4QxMk9qYqTScsDMB7IliaWRB1HueYy7w5qxqNw/exec";
+      const masterSheetName = "MASTER";
 
-      const url = `https://docs.google.com/spreadsheets/d/${masterSheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(
-        masterSheetName,
-      )}`;
+      const url = `${appsScriptUrl}?sheet=${encodeURIComponent(masterSheetName)}&action=fetch`;
 
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`Failed to fetch master data: ${response.status}`);
       }
 
-      const text = await response.text();
-      const jsonStart = text.indexOf("{");
-      const jsonEnd = text.lastIndexOf("}");
-      const jsonString = text.substring(jsonStart, jsonEnd + 1);
-      const data = JSON.parse(jsonString);
+      const data = await response.json();
 
       if (!data.table || !data.table.rows) {
-        // console.log("No master data found");
+        console.log("No master data found");
         return;
       }
 
@@ -230,23 +224,23 @@ export default function AssignTask() {
 
       // Process all rows starting from index 1 (skip header)
       data.table.rows.slice(1).forEach((row) => {
-        // Column A - Departments
+        // Column A (Index 0) - Departments
         if (row.c && row.c[0] && row.c[0].v) {
           const value = row.c[0].v.toString().trim();
           if (value !== "") {
             departments.push(value);
           }
         }
-        // Column B - Given By
+        // Column B (Index 1) - Given By
         if (row.c && row.c[1] && row.c[1].v) {
           const value = row.c[1].v.toString().trim();
           if (value !== "") {
             givenBy.push(value);
           }
         }
-        // Column C - Doers
-        if (row.c && row.c[3] && row.c[3].v) {
-          const value = row.c[3].v.toString().trim();
+        // Column C (Index 2) - Doers
+        if (row.c && row.c[2] && row.c[2].v) {
+          const value = row.c[2].v.toString().trim();
           if (value !== "") {
             doers.push(value);
           }
@@ -258,14 +252,43 @@ export default function AssignTask() {
       setGivenByOptions([...new Set(givenBy)].sort());
       setDoerOptions([...new Set(doers)].sort());
 
-      // console.log("Master sheet options loaded successfully", {
-      //   departments: [...new Set(departments)],
-      //   givenBy: [...new Set(givenBy)],
-      //   doers: [...new Set(doers)],
-      // });
+      console.log("Master sheet options loaded successfully from Apps Script");
     } catch (error) {
       console.error("Error fetching master sheet options:", error);
-      // Set default options if fetch fails
+      // Fallback: try the direct gviz URL if Apps Script fails
+      try {
+        const masterSheetId = "1YCLFppf8OrwZjKjhVyVB77s63vFQUylXzEniWLeatW0";
+        const gvizUrl = `https://docs.google.com/spreadsheets/d/${masterSheetId}/gviz/tq?tqx=out:json&sheet=MASTER`;
+
+        const gvizResponse = await fetch(gvizUrl);
+        if (gvizResponse.ok) {
+          const text = await gvizResponse.text();
+          const jsonStart = text.indexOf("{");
+          const jsonEnd = text.lastIndexOf("}");
+          const data = JSON.parse(text.substring(jsonStart, jsonEnd + 1));
+
+          if (data.table && data.table.rows) {
+            const depts = [];
+            const givers = [];
+            const staff = [];
+
+            data.table.rows.slice(1).forEach(row => {
+              if (row.c && row.c[0]?.v) depts.push(row.c[0].v.toString().trim());
+              if (row.c && row.c[1]?.v) givers.push(row.c[1].v.toString().trim());
+              if (row.c && row.c[2]?.v) staff.push(row.c[2].v.toString().trim());
+            });
+
+            setDepartmentOptions([...new Set(depts)].sort());
+            setGivenByOptions([...new Set(givers)].sort());
+            setDoerOptions([...new Set(staff)].sort());
+            return;
+          }
+        }
+      } catch (fallbackError) {
+        console.error("Fallback fetch also failed:", fallbackError);
+      }
+
+      // Default options if all fetches fail
       setDepartmentOptions(["Department 1", "Department 2"]);
       setGivenByOptions(["User 1", "User 2"]);
       setDoerOptions(["Doer 1", "Doer 2"]);
@@ -323,42 +346,15 @@ export default function AssignTask() {
   // Add a function to get the last task ID from the specified sheet
   const getLastTaskId = async (sheetName) => {
     try {
-      const sheetId = "1YCLFppf8OrwZjKjhVyVB77s63vFQUylXzEniWLeatW0/";
+      const appsScriptUrl = "https://script.google.com/macros/s/AKfycbyGf3LdYk6MPiOs_shPU9_AW7wmRjJZ4QxMk9qYqTScsDMB7IliaWRB1HueYy7w5qxqNw/exec";
+      const url = `${appsScriptUrl}?sheet=${encodeURIComponent(sheetName)}&action=fetch`;
 
-      // Try with the provided sheet name first, then try alternate case
-      const sheetNamesToTry = [
-        sheetName,
-        sheetName.toUpperCase(),
-        sheetName.toLowerCase(),
-        sheetName.charAt(0).toUpperCase() + sheetName.slice(1).toLowerCase(),
-      ];
-
-      let data = null;
-      let successfulSheetName = null;
-
-      for (const trySheetName of sheetNamesToTry) {
-        try {
-          const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(
-            trySheetName,
-          )}`;
-
-          const response = await fetch(url);
-          if (!response.ok) continue;
-
-          const text = await response.text();
-          const jsonStart = text.indexOf("{");
-          const jsonEnd = text.lastIndexOf("}");
-          const jsonString = text.substring(jsonStart, jsonEnd + 1);
-          data = JSON.parse(jsonString);
-
-          if (data.table && data.table.rows) {
-            successfulSheetName = trySheetName;
-            break;
-          }
-        } catch (e) {
-          continue;
-        }
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+
+      const data = await response.json();
 
       if (
         !data ||
@@ -366,13 +362,9 @@ export default function AssignTask() {
         !data.table.rows ||
         data.table.rows.length <= 1
       ) {
-        console.log(`No existing tasks found in sheet, starting from ID 1`);
+        console.log(`No existing tasks found in ${sheetName}, starting from ID 1`);
         return 0; // Start from 1 if no tasks exist (only header row)
       }
-
-      console.log(
-        `Successfully fetched data from sheet: ${successfulSheetName}`,
-      );
 
       // Get the last task ID from column B (index 1)
       let lastTaskId = 0;
@@ -388,7 +380,7 @@ export default function AssignTask() {
         }
       }
 
-      console.log(`Last Task ID in ${successfulSheetName}: ${lastTaskId}`);
+      console.log(`Last Task ID in ${sheetName}: ${lastTaskId}`);
       return lastTaskId;
     } catch (error) {
       console.error("Error fetching last task ID:", error);
@@ -408,12 +400,10 @@ export default function AssignTask() {
   // Function to fetch working days from the Working Day Calendar sheet
   const fetchWorkingDays = async () => {
     try {
-      const sheetId = "1YCLFppf8OrwZjKjhVyVB77s63vFQUylXzEniWLeatW0/";
+      const appsScriptUrl = "https://script.google.com/macros/s/AKfycbyGf3LdYk6MPiOs_shPU9_AW7wmRjJZ4QxMk9qYqTScsDMB7IliaWRB1HueYy7w5qxqNw/exec";
       const sheetName = "Working Day Calendar";
 
-      const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(
-        sheetName,
-      )}`;
+      const url = `${appsScriptUrl}?sheet=${encodeURIComponent(sheetName)}&action=fetch`;
 
       const response = await fetch(url);
       if (!response.ok) {
@@ -421,53 +411,90 @@ export default function AssignTask() {
       }
 
       const text = await response.text();
-      const jsonStart = text.indexOf("{");
-      const jsonEnd = text.lastIndexOf("}");
-      const jsonString = text.substring(jsonStart, jsonEnd + 1);
-      const data = JSON.parse(jsonString);
-
-      if (!data.table || !data.table.rows) {
-        // console.log("No working day data found");
-        return [];
+      let parsedData;
+      try {
+        parsedData = JSON.parse(text);
+      } catch (e) {
+        // Robust JSON extraction if response is wrapped
+        const jsonStart = text.indexOf("{");
+        const jsonEnd = text.lastIndexOf("}");
+        if (jsonStart !== -1 && jsonEnd !== -1) {
+          parsedData = JSON.parse(text.substring(jsonStart, jsonEnd + 1));
+        } else {
+          throw new Error("Invalid JSON response from server");
+        }
       }
+
+      let rows = [];
+      if (parsedData.table && parsedData.table.rows) {
+        rows = parsedData.table.rows;
+      } else if (Array.isArray(parsedData)) {
+        rows = parsedData;
+      } else if (parsedData.values) {
+        rows = parsedData.values.map(r => ({ c: r.map(v => ({ v: v })) }));
+      }
+
+      if (rows.length === 0) return [];
 
       // Extract dates from column A
       const workingDays = [];
-      data.table.rows.forEach((row) => {
-        if (row.c && row.c[0] && row.c[0].v) {
-          let dateValue = row.c[0].v;
 
-          // Handle Google Sheets Date(year,month,day) format
-          if (typeof dateValue === "string" && dateValue.startsWith("Date(")) {
-            const match = /Date\((\d+),(\d+),(\d+)\)/.exec(dateValue);
-            if (match) {
-              const year = parseInt(match[1], 10);
-              const month = parseInt(match[2], 10); // 0-indexed in Google's format
-              const dateDay = parseInt(match[3], 10);
+      // Skip header row
+      rows.slice(1).forEach((row) => {
+        let dateValue = null;
 
-              dateValue = `${dateDay.toString().padStart(2, "0")}/${(month + 1)
-                .toString()
-                .padStart(2, "0")}/${year}`;
+        // Extract cell value - Column A (index 0)
+        if (row.c && row.c[0]) {
+          // Prefer formatted value 'f', then raw value 'v'
+          dateValue = row.c[0].f || row.c[0].v;
+        } else if (Array.isArray(row) && row[0] !== undefined) {
+          dateValue = row[0];
+        }
+
+        if (dateValue === null || dateValue === undefined || dateValue === "") return;
+
+        // Normalize to string and trim
+        dateValue = dateValue.toString().trim();
+
+        let formattedDate = null;
+
+        // 1. Handle DD/MM/YYYY or D/M/YYYY
+        if (dateValue.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
+          const [d, m, y] = dateValue.split('/').map(Number);
+          formattedDate = `${d.toString().padStart(2, "0")}/${m.toString().padStart(2, "0")}/${y}`;
+        }
+        // 2. Handle Google Date format: Date(2026,1,23)
+        else if (dateValue.startsWith("Date(")) {
+          const match = /Date\((\d+),(\d+),(\d+)/.exec(dateValue);
+          if (match) {
+            const year = parseInt(match[1], 10);
+            const month = parseInt(match[2], 10) + 1; // 0-indexed month
+            const day = parseInt(match[3], 10);
+            formattedDate = `${day.toString().padStart(2, "0")}/${month.toString().padStart(2, "0")}/${year}`;
+          }
+        }
+        // 3. Fallback to generic JS Date parsing
+        else {
+          try {
+            const d = new Date(dateValue);
+            if (!isNaN(d.getTime())) {
+              formattedDate = formatDateToDDMMYYYY(d);
             }
-          } else if (dateValue instanceof Date) {
-            // If it's a Date object
-            dateValue = formatDateToDDMMYYYY(dateValue);
+          } catch (e) {
+            // Skip unparseable dates
           }
+        }
 
-          if (
-            typeof dateValue === "string" &&
-            dateValue.match(/^\d{2}\/\d{2}\/\d{4}$/) // DD/MM/YYYY pattern
-          ) {
-            workingDays.push(dateValue);
-          }
+        if (formattedDate && formattedDate.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+          workingDays.push(formattedDate);
         }
       });
 
-      // console.log(`Fetched ${workingDays.length} working days`);
+      console.log(`Found ${workingDays.length} valid working days`);
       return workingDays;
     } catch (error) {
       console.error("Error fetching working days:", error);
-      return []; // Return empty array if fetch fails
+      return [];
     }
   };
 
@@ -528,10 +555,17 @@ export default function AssignTask() {
       });
 
       const selectedDate = new Date(date);
+      selectedDate.setHours(0, 0, 0, 0); // Standardize to midnight for comparison
+
       const futureDates = sortedWorkingDays.filter((dateStr) => {
-        const [dateDay, month, year] = dateStr.split("/").map(Number);
-        const dateObj = new Date(year, month - 1, dateDay);
-        return dateObj >= selectedDate;
+        try {
+          const [dateDay, month, year] = dateStr.split("/").map(Number);
+          const dateObj = new Date(year, month - 1, dateDay);
+          dateObj.setHours(0, 0, 0, 0);
+          return dateObj >= selectedDate;
+        } catch (e) {
+          return false;
+        }
       });
 
       if (futureDates.length === 0) {
@@ -747,12 +781,10 @@ export default function AssignTask() {
       // Helper function to check if this is the first task for the user
       const isFirstTaskForUser = async (doerName) => {
         try {
-          const sheetId = "1YCLFppf8OrwZjKjhVyVB77s63vFQUylXzEniWLeatW0/";
+          const appsScriptUrl = "https://script.google.com/macros/s/AKfycbyGf3LdYk6MPiOs_shPU9_AW7wmRjJZ4QxMk9qYqTScsDMB7IliaWRB1HueYy7w5qxqNw/exec";
           const sheetName = "Checklist";
 
-          const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(
-            sheetName,
-          )}`;
+          const url = `${appsScriptUrl}?sheet=${encodeURIComponent(sheetName)}&action=fetch`;
 
           const response = await fetch(url);
           if (!response.ok) {
@@ -760,13 +792,9 @@ export default function AssignTask() {
             return true;
           }
 
-          const text = await response.text();
-          const jsonStart = text.indexOf("{");
-          const jsonEnd = text.lastIndexOf("}");
-          const jsonString = text.substring(jsonStart, jsonEnd + 1);
-          const data = JSON.parse(jsonString);
+          const data = await response.json();
 
-          if (!data.table || !data.table.rows || data.table.rows.length <= 1) {
+          if (!data || !data.table || !data.table.rows || data.table.rows.length <= 1) {
             console.log("Checklist sheet is empty - treating as first task");
             return true;
           }
