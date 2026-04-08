@@ -90,7 +90,8 @@ export default function QuickTask() {
       newSelected.add(taskId);
       newEditing.add(taskId);
       // Initialize edited data with current task data
-      const task = filteredChecklistTasks.find(t => t._id === taskId);
+      const currentTasks = activeTab === 'checklist' ? filteredChecklistTasks : filteredDelegationTasks;
+      const task = currentTasks.find(t => t._id === taskId);
       setEditedData(prev => ({ ...prev, [taskId]: { ...task } }));
     }
 
@@ -99,19 +100,21 @@ export default function QuickTask() {
   };
 
   const handleSelectAll = () => {
-    if (selectedRows.size === filteredChecklistTasks.length) {
+    const currentTasks = activeTab === 'checklist' ? filteredChecklistTasks : filteredDelegationTasks;
+
+    if (selectedRows.size === currentTasks.length && currentTasks.length > 0) {
       // Deselect all
       setSelectedRows(new Set());
       setEditingRows(new Set());
       setEditedData({});
     } else {
       // Select all
-      const allIds = new Set(filteredChecklistTasks.map(task => task._id));
+      const allIds = new Set(currentTasks.map(task => task._id));
       setSelectedRows(allIds);
       setEditingRows(allIds);
       // Initialize edited data for all tasks
       const newEditedData = {};
-      filteredChecklistTasks.forEach(task => {
+      currentTasks.forEach(task => {
         newEditedData[task._id] = { ...task };
       });
       setEditedData(newEditedData);
@@ -201,7 +204,9 @@ export default function QuickTask() {
     try {
       setSubmitting(true);
       const userAppScriptUrl = CONFIG.APPS_SCRIPT_URL;
-      const originalTask = tasks.find(t => t._id === taskInternalId);
+      const isChecklist = activeTab === 'checklist';
+      const currentDataList = isChecklist ? tasks : delegationTasks;
+      const originalTask = currentDataList.find(t => t._id === taskInternalId);
       const editedTask = editedData[taskInternalId];
 
       if (!originalTask || !editedTask) {
@@ -209,23 +214,40 @@ export default function QuickTask() {
       }
 
       const existingTaskId = originalTask['Task ID'];
-      const rowIndex = originalTask._rowIndex;
+      const sheetName = isChecklist ? CONFIG.CHECKLIST_SHEET : CONFIG.DELEGATION_SHEET;
 
-      const rowData = [
-        "", // Column A - Timestamp
-        String(existingTaskId), // Column B - Task ID
-        editedTask.Department || originalTask.Department || "",
-        editedTask['Given By'] || originalTask['Given By'] || "",
-        editedTask.Name || originalTask.Name || "",
-        editedTask['Task Description'] || originalTask['Task Description'] || "",
-        formatDateForSheet(editedTask['End Date'] || originalTask['End Date']),
-        editedTask.Frequency || originalTask.Frequency || "",
-        editedTask.Reminders || originalTask.Reminders || "",
-        editedTask.Attachment || originalTask.Attachment || ""
-      ];
+      let rowData = [];
+      if (isChecklist) {
+        rowData = [
+          "", // Column A - Timestamp
+          String(existingTaskId), // Column B - Task ID
+          editedTask.Department || originalTask.Department || "",
+          editedTask['Given By'] || originalTask['Given By'] || "",
+          editedTask.Name || originalTask.Name || "",
+          editedTask['Task Description'] || originalTask['Task Description'] || "",
+          formatDateForSheet(editedTask['Start Date'] || originalTask['Start Date']),
+          editedTask.Frequency || originalTask.Frequency || "",
+          editedTask.Reminders || originalTask.Reminders || "",
+          editedTask.Attachment || originalTask.Attachment || ""
+        ];
+      } else {
+        // Delegation Sheet structure: Timestamp, Task ID, Dept, Given By, Name, Desc, Task Start Date, Freq, Reminders, Attachment
+        rowData = [
+          formatTimestampForSheet(), // Column A - Timestamp
+          String(existingTaskId), // Column B - Task ID
+          editedTask.Department || originalTask.Department || "",
+          editedTask['Given By'] || originalTask['Given By'] || "",
+          editedTask.Name || originalTask.Name || "",
+          editedTask['Task Description'] || originalTask['Task Description'] || "",
+          formatDateForSheet(editedTask['Task Start Date'] || originalTask['Task Start Date']),
+          editedTask.Freq || originalTask.Freq || "",
+          editedTask['Enable Reminders'] || originalTask['Enable Reminders'] || "",
+          editedTask['Require Attachment'] || originalTask['Require Attachment'] || ""
+        ];
+      }
 
       const requestBody = {
-        sheetName: CONFIG.CHECKLIST_SHEET,
+        sheetName: sheetName,
         action: 'updateQuickTask',
         taskId: String(existingTaskId),
         rowData: JSON.stringify(rowData)
@@ -241,7 +263,7 @@ export default function QuickTask() {
       const result = await response.json();
 
       if (result.success) {
-        alert('Task updated successfully!');
+        alert(`${isChecklist ? 'Checklist' : 'Delegation'} task updated successfully!`);
         // Remove from editing mode after success
         const newEditing = new Set(editingRows);
         newEditing.delete(taskInternalId);
@@ -251,7 +273,11 @@ export default function QuickTask() {
         newSelected.delete(taskInternalId);
         setSelectedRows(newSelected);
 
-        await fetchChecklistData();
+        if (isChecklist) {
+          await fetchChecklistData();
+        } else {
+          await fetchDelegationData();
+        }
       } else {
         throw new Error(result.error || result.message);
       }
@@ -274,8 +300,9 @@ export default function QuickTask() {
     try {
       setDeleting(task._id);
 
-      const userAppScriptUrl = "https://script.google.com/macros/s/AKfycbyGf3LdYk6MPiOs_shPU9_AW7wmRjJZ4QxMk9qYqTScsDMB7IliaWRB1HueYy7w5qxqNw/exec";
-      const sheetName = CONFIG.CHECKLIST_SHEET;
+      const userAppScriptUrl = CONFIG.APPS_SCRIPT_URL;
+      const isChecklist = activeTab === 'checklist';
+      const sheetName = isChecklist ? CONFIG.CHECKLIST_SHEET : CONFIG.DELEGATION_SHEET;
 
       // Use rowIndex to identify the row to delete (matches backend handleDeleteRow)
       const rowIndex = task._rowIndex;
@@ -310,8 +337,12 @@ export default function QuickTask() {
       if (!result.success) throw new Error(result.error || 'Server returned error');
 
       // Refresh the data
-      await fetchChecklistData();
-      alert(`Task "${taskId}" deleted successfully!`);
+      if (isChecklist) {
+        await fetchChecklistData();
+      } else {
+        await fetchDelegationData();
+      }
+      alert(`${isChecklist ? 'Checklist' : 'Delegation'} task "${taskId}" deleted successfully!`);
     } catch (error) {
       console.error('Delete error:', error);
       alert(`Error deleting task: ${error.message}`);
@@ -458,7 +489,7 @@ export default function QuickTask() {
             'Given By': rowValues[3] || "",
             Name: rowValues[4] || "",
             'Task Description': rowValues[5] || "",
-            'End Date': formatDateForSheet(rowValues[6]),
+            'Start Date': formatDateForSheet(rowValues[6]),
             Frequency: rowValues[7] || "",
             Reminders: rowValues[8] || "",
             Attachment: rowValues[9] || "",
@@ -540,7 +571,7 @@ export default function QuickTask() {
             'Given By': rowValues[3] || "",
             Name: rowValues[4] || "",
             'Task Description': rowValues[5] || "",
-            'Task End Date': formatDate(rowValues[6]),
+            'Task Start Date': formatDate(rowValues[6]),
             Freq: rowValues[7] || "",
             'Enable Reminders': rowValues[8] || "",
             'Require Attachment': rowValues[9] || "",
@@ -699,6 +730,27 @@ export default function QuickTask() {
     return 0;
   });
 
+  // Memoized derived data for Delegation
+  const filteredDelegationTasks = delegationTasks.filter(task => {
+    const nameFilterPass = !nameFilter || task.Name === nameFilter;
+    const freqFilterPass = !freqFilter || task.Freq === freqFilter;
+    const searchTermPass = Object.values(task).some(
+      value => value && value.toString().toLowerCase().includes(searchTerm.toLowerCase())
+    );
+    return nameFilterPass && freqFilterPass && searchTermPass;
+  }).sort((a, b) => {
+    if (!sortConfig.key) return 0;
+    if (a[sortConfig.key] < b[sortConfig.key]) {
+      return sortConfig.direction === 'asc' ? -1 : 1;
+    }
+    if (a[sortConfig.key] > b[sortConfig.key]) {
+      return sortConfig.direction === 'asc' ? 1 : -1;
+    }
+    return 0;
+  });
+
+  const currentFilteredTasks = activeTab === 'checklist' ? filteredChecklistTasks : filteredDelegationTasks;
+
   // Auto-detect user on component mount
   useEffect(() => {
     fetchCurrentUser();
@@ -757,10 +809,32 @@ export default function QuickTask() {
   return (
     <AdminLayout>
       <div className="sticky top-0 z-30 bg-white pb-4 border-b border-gray-200">
+        {/* Tab Selection */}
+        <div className="flex border-b border-gray-200 mb-4 overflow-x-auto no-scrollbar">
+          <button
+            onClick={() => setActiveTab('checklist')}
+            className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors duration-200 ${activeTab === 'checklist'
+              ? 'border-purple-600 text-purple-700 bg-purple-50'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              }`}
+          >
+            Checklist Tasks
+          </button>
+          <button
+            onClick={() => setActiveTab('delegation')}
+            className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors duration-200 ${activeTab === 'delegation'
+              ? 'border-purple-600 text-purple-700 bg-purple-50'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              }`}
+          >
+            Delegation Tasks
+          </button>
+        </div>
+
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-purple-700 pl-3">
-              {CONFIG.PAGE_CONFIG.title}
+              {activeTab === 'checklist' ? 'Checklist Management' : 'Delegation Management'}
             </h1>
             <p className="text-purple-600 text-sm pl-3">
               {currentUser && `Welcome ${currentUser}`}
@@ -772,11 +846,11 @@ export default function QuickTask() {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
               <input
                 type="text"
-                placeholder="Search tasks..."
+                placeholder={`Search ${activeTab === 'checklist' ? 'checklist' : 'delegation'} tasks...`}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-purple-200 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
-                disabled={loading}
+                disabled={loading || delegationLoading}
               />
             </div>
 
@@ -791,7 +865,7 @@ export default function QuickTask() {
                   <ChevronDown size={16} className={`transition-transform ${dropdownOpen.name ? 'rotate-180' : ''}`} />
                 </button>
                 {dropdownOpen.name && (
-                  <div className="absolute z-50 mt-1 w-56 rounded-md bg-white shadow-lg border border-gray-200 max-h-60 overflow-auto">
+                  <div className="absolute z-50 mt-1 right-0 w-56 rounded-md bg-white shadow-lg border border-gray-200 max-h-60 overflow-auto">
                     <div className="py-1">
                       <button
                         onClick={clearNameFilter}
@@ -819,17 +893,17 @@ export default function QuickTask() {
                   className="flex items-center gap-2 px-3 py-2 border border-purple-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
                 >
                   <Filter className="h-4 w-4" />
-                  {freqFilter || 'Filter by Frequency'}
+                  {freqFilter || (activeTab === 'checklist' ? 'Filter by Frequency' : 'Filter by Freq')}
                   <ChevronDown size={16} className={`transition-transform ${dropdownOpen.frequency ? 'rotate-180' : ''}`} />
                 </button>
                 {dropdownOpen.frequency && (
-                  <div className="absolute z-50 mt-1 w-56 rounded-md bg-white shadow-lg border border-gray-200 max-h-60 overflow-auto">
+                  <div className="absolute z-50 mt-1 right-0 w-56 rounded-md bg-white shadow-lg border border-gray-200 max-h-60 overflow-auto">
                     <div className="py-1">
                       <button
                         onClick={clearFrequencyFilter}
                         className={`block w-full text-left px-4 py-2 text-sm ${!freqFilter ? 'bg-purple-100 text-purple-900' : 'text-gray-700 hover:bg-gray-100'}`}
                       >
-                        All Frequencies
+                        {activeTab === 'checklist' ? 'All Frequencies' : 'All Freq'}
                       </button>
                       {currentFrequencies.map(freq => (
                         <button
@@ -852,10 +926,16 @@ export default function QuickTask() {
       <div className="mt-4 rounded-lg border border-purple-200 shadow-md bg-white overflow-hidden">
         <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
           <h2 className="text-purple-700 font-medium">
-            {isAdmin ? 'All Unique Tasks' : 'My Unique Tasks'}
+            {activeTab === 'checklist'
+              ? (isAdmin ? 'All Unique Checklists' : 'My Unique Checklists')
+              : (isAdmin ? 'All Delegation Tasks' : 'My Delegation Tasks')
+            }
           </h2>
           <p className="text-purple-600 text-sm">
-            {isAdmin ? 'Showing all unique tasks from checklist' : CONFIG.PAGE_CONFIG.description}
+            {activeTab === 'checklist'
+              ? (isAdmin ? 'Showing all unique tasks from checklist' : 'Showing your unique checklist tasks')
+              : (isAdmin ? 'Showing all delegation tasks' : 'Showing your delegation tasks')
+            }
           </p>
         </div>
 
@@ -864,7 +944,6 @@ export default function QuickTask() {
           <div className="mb-4 flex justify-end p-4 bg-blue-50 border-b">
             <button
               onClick={() => {
-                // Trigger bulk update logic if needed, or row-by-row
                 alert('Bulk update functionality coming soon or use individual save buttons.');
               }}
               disabled={submitting}
@@ -884,7 +963,7 @@ export default function QuickTask() {
                     <div className="flex items-center">
                       <input
                         type="checkbox"
-                        checked={selectedRows.size === filteredChecklistTasks.length && filteredChecklistTasks.length > 0}
+                        checked={selectedRows.size === currentFilteredTasks.length && currentFilteredTasks.length > 0}
                         onChange={handleSelectAll}
                         className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
                       />
@@ -900,10 +979,10 @@ export default function QuickTask() {
                   { key: 'Given By', label: 'Given By' },
                   { key: 'Name', label: 'Name' },
                   { key: 'Task Description', label: 'Task Description', minWidth: 'min-w-[300px]' },
-                  { key: 'End Date', label: 'End Date', bg: 'bg-yellow-50' },
-                  { key: 'Frequency', label: 'Frequency' },
-                  { key: 'Reminders', label: 'Reminders' },
-                  { key: 'Attachment', label: 'Attachment' },
+                  { key: activeTab === 'checklist' ? 'Start Date' : 'Task Start Date', label: 'Start Date', bg: 'bg-yellow-50' },
+                  { key: activeTab === 'checklist' ? 'Frequency' : 'Freq', label: 'Frequency' },
+                  { key: activeTab === 'checklist' ? 'Reminders' : 'Enable Reminders', label: 'Reminders' },
+                  { key: activeTab === 'checklist' ? 'Attachment' : 'Require Attachment', label: 'Attachment' },
                 ].map((column) => (
                   <th
                     key={column.label}
@@ -923,20 +1002,26 @@ export default function QuickTask() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {loading ? (
+              {(loading || delegationLoading) ? (
                 <tr>
                   <td colSpan={isAdmin ? 10 : 9} className="px-6 py-8 text-center">
                     <div className="flex flex-col items-center justify-center">
                       <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500 mb-2"></div>
-                      <p className="text-purple-600">Loading Unique tasks...</p>
+                      <p className="text-purple-600">Loading {activeTab} tasks...</p>
                     </div>
                   </td>
                 </tr>
-              ) : filteredChecklistTasks.length > 0 ? (
-                filteredChecklistTasks.map((task) => {
+              ) : currentFilteredTasks.length > 0 ? (
+                currentFilteredTasks.map((task) => {
                   const isEditing = editingRows.has(task._id);
                   const editedTask = editedData[task._id] || task;
                   const isSelected = selectedRows.has(task._id);
+
+                  // Field mapping based on tab
+                  const startDateKey = activeTab === 'checklist' ? 'Start Date' : 'Task Start Date';
+                  const freqKey = activeTab === 'checklist' ? 'Frequency' : 'Freq';
+                  const reminderKey = activeTab === 'checklist' ? 'Reminders' : 'Enable Reminders';
+                  const attachmentKey = activeTab === 'checklist' ? 'Attachment' : 'Require Attachment';
 
                   return (
                     <tr key={task._id} className={`hover:bg-gray-50 ${isEditing ? 'bg-blue-50' : ''}`}>
@@ -1038,60 +1123,47 @@ export default function QuickTask() {
                           <div className="flex gap-2 items-center">
                             <input
                               type="date"
-                              value={editedTask['End Date'] ? editedTask['End Date'].split(' ')[0].split('/').reverse().join('-') : ''}
+                              value={editedTask[startDateKey] ? editedTask[startDateKey].split(' ')[0].split('/').reverse().join('-') : ''}
                               onChange={(e) => {
                                 if (e.target.value) {
                                   const [year, month, day] = e.target.value.split('-');
-                                  handleInputChange(task._id, 'End Date', `${day}/${month}/${year} 00:00:00`);
+                                  handleInputChange(task._id, startDateKey, `${day}/${month}/${year} 00:00:00`);
                                 }
                               }}
                               className="px-2 py-1 border border-gray-300 rounded text-sm"
                             />
                           </div>
                         ) : (
-                          formatDate(task['End Date']) || "—"
+                          formatDate(task[startDateKey]) || "—"
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <span className={`px-2 py-1 rounded-full text-xs ${task[freqKey] === 'Daily' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100'}`}>
+                          {task[freqKey] || "—"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {isEditing ? (
-                          <select
-                            value={editedTask.Frequency || ''}
-                            onChange={(e) => handleInputChange(task._id, 'Frequency', e.target.value)}
+                          <input
+                            type="text"
+                            value={editedTask[reminderKey] || ''}
+                            onChange={(e) => handleInputChange(task._id, reminderKey, e.target.value)}
                             className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                          >
-                            <option value="">Frequency</option>
-                            <option value="Daily">Daily</option>
-                            <option value="Weekly">Weekly</option>
-                            <option value="Monthly">Monthly</option>
-                          </select>
+                          />
                         ) : (
-                          <span className={`px-2 py-1 rounded-full text-xs ${task.Frequency === 'Daily' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100'}`}>
-                            {task.Frequency || "—"}
-                          </span>
+                          task[reminderKey] || "—"
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {isEditing ? (
                           <input
                             type="text"
-                            value={editedTask.Reminders || ''}
-                            onChange={(e) => handleInputChange(task._id, 'Reminders', e.target.value)}
+                            value={editedTask[attachmentKey] || ''}
+                            onChange={(e) => handleInputChange(task._id, attachmentKey, e.target.value)}
                             className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
                           />
                         ) : (
-                          task.Reminders || "—"
-                        )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={editedTask.Attachment || ''}
-                            onChange={(e) => handleInputChange(task._id, 'Attachment', e.target.value)}
-                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                          />
-                        ) : (
-                          task.Attachment || "—"
+                          task[attachmentKey] || "—"
                         )}
                       </td>
                     </tr>
@@ -1100,7 +1172,7 @@ export default function QuickTask() {
               ) : (
                 <tr>
                   <td colSpan={isAdmin ? 10 : 9} className="px-6 py-4 text-center text-gray-500">
-                    No unique tasks found.
+                    No {activeTab} tasks found.
                   </td>
                 </tr>
               )}
@@ -1110,21 +1182,24 @@ export default function QuickTask() {
 
         {/* Mobile View */}
         <div className="sm:hidden space-y-4 p-4">
-          {filteredChecklistTasks.map((task) => (
-            <div key={task._id} className="bg-white border rounded-lg p-4 shadow-sm border-gray-200">
-              <div className="flex justify-between items-center mb-2">
-                <span className="font-bold text-purple-700">{task['Task ID']}</span>
-                {isAdmin && (
-                  <button onClick={() => handleDeleteTask(task)} className="text-red-500"><Trash2 className="h-5 w-5" /></button>
-                )}
+          {currentFilteredTasks.map((task) => {
+            const startDateKey = activeTab === 'checklist' ? 'Start Date' : 'Task Start Date';
+            return (
+              <div key={task._id} className="bg-white border rounded-lg p-4 shadow-sm border-gray-200">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-bold text-purple-700">{task['Task ID']}</span>
+                  {isAdmin && (
+                    <button onClick={() => handleDeleteTask(task)} className="text-red-500"><Trash2 className="h-5 w-5" /></button>
+                  )}
+                </div>
+                <div className="text-sm space-y-1">
+                  <p><span className="font-medium">Name:</span> {task.Name}</p>
+                  <p><span className="font-medium">Desc:</span> {task['Task Description']}</p>
+                  <p><span className="font-medium">Date:</span> {formatDate(task[startDateKey])}</p>
+                </div>
               </div>
-              <div className="text-sm space-y-1">
-                <p><span className="font-medium">Name:</span> {task.Name}</p>
-                <p><span className="font-medium">Desc:</span> {task['Task Description']}</p>
-                <p><span className="font-medium">Date:</span> {formatDate(task['End Date'])}</p>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </AdminLayout>
