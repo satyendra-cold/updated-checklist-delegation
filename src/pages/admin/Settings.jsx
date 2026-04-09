@@ -141,8 +141,8 @@ function Settings() {
                     const doerName = rowValues[2] || ""
                     const password = rowValues[3] || ""
                     const role = rowValues[4] || ""
-                    const phoneNumber = rowValues[6] || ""
-
+                    const phoneNumber = (rowValues.length > 6 ? rowValues[6] : "") || ""
+                    
                     if (doerName || password || department || givenBy) {
                         return {
                             id: index,
@@ -152,7 +152,7 @@ function Settings() {
                             doerName: doerName.toString().trim(),
                             password: password.toString().trim(),
                             role: role.toString().trim(),
-                            phoneNumber: phoneNumber.toString().trim(),
+                            phoneNumber: phoneNumber.toString().trim().replace(/^[\u200B']/, ''),
                             _originalRow: rowValues
                         }
                     }
@@ -527,9 +527,9 @@ function Settings() {
             rowData[3] = editedValues.password
             rowData[4] = editedValues.role
             
-            // Col G is index 6
+            // Col G is index 6 - Use zero-width space to force text format in Google Sheets
             while (rowData.length <= 6) rowData.push("")
-            rowData[6] = editedValues.phoneNumber
+            rowData[6] = editedValues.phoneNumber ? `\u200B${editedValues.phoneNumber}` : ""
 
             const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
                 method: 'POST',
@@ -628,7 +628,7 @@ function Settings() {
                 newEntry.password, 
                 newEntry.role,
                 '', // Col F (index 5)
-                newEntry.phoneNumber // Col G (index 6)
+                newEntry.phoneNumber ? `\u200B${newEntry.phoneNumber}` : "" // Col G (index 6) - Zero-width space
             ]
 
             const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
@@ -636,8 +636,7 @@ function Settings() {
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: new URLSearchParams({
                     sheetName: CONFIG.SHEET_NAME,
-                    action: 'update',
-                    rowIndex: String(nextRowIndex),
+                    action: 'add',
                     rowData: JSON.stringify(rowData)
                 })
             })
