@@ -17,13 +17,13 @@ function Settings() {
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
     const [editingId, setEditingId] = useState(null)
-    const [editedValues, setEditedValues] = useState({ doerName: '', password: '', role: '' })
+    const [editedValues, setEditedValues] = useState({ doerName: '', password: '', role: '', phoneNumber: '' })
     const [saving, setSaving] = useState(false)
     const [successMessage, setSuccessMessage] = useState('')
     const [deleting, setDeleting] = useState(null)
     const [authorized, setAuthorized] = useState(false)
     const [showAddModal, setShowAddModal] = useState(false)
-    const [newEntry, setNewEntry] = useState({ department: '', givenBy: '', doerName: '', password: '', role: '' })
+    const [newEntry, setNewEntry] = useState({ department: '', givenBy: '', doerName: '', password: '', role: '', phoneNumber: '' })
     const [adding, setAdding] = useState(false)
 
     // UI states from reference
@@ -141,6 +141,7 @@ function Settings() {
                     const doerName = rowValues[2] || ""
                     const password = rowValues[3] || ""
                     const role = rowValues[4] || ""
+                    const phoneNumber = rowValues[6] || ""
 
                     if (doerName || password || department || givenBy) {
                         return {
@@ -151,6 +152,7 @@ function Settings() {
                             doerName: doerName.toString().trim(),
                             password: password.toString().trim(),
                             role: role.toString().trim(),
+                            phoneNumber: phoneNumber.toString().trim(),
                             _originalRow: rowValues
                         }
                     }
@@ -503,13 +505,14 @@ function Settings() {
         setEditedValues({
             doerName: row.doerName,
             password: row.password,
-            role: row.role
+            role: row.role,
+            phoneNumber: row.phoneNumber || ''
         })
     }
 
     const handleCancelEdit = () => {
         setEditingId(null)
-        setEditedValues({ doerName: '', password: '', role: '' })
+        setEditedValues({ doerName: '', password: '', role: '', phoneNumber: '' })
     }
 
     const handleSaveEdit = async (row) => {
@@ -523,6 +526,10 @@ function Settings() {
             rowData[2] = editedValues.doerName
             rowData[3] = editedValues.password
             rowData[4] = editedValues.role
+            
+            // Col G is index 6
+            while (rowData.length <= 6) rowData.push("")
+            rowData[6] = editedValues.phoneNumber
 
             const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
                 method: 'POST',
@@ -546,6 +553,7 @@ function Settings() {
                             doerName: editedValues.doerName,
                             password: editedValues.password,
                             role: editedValues.role,
+                            phoneNumber: editedValues.phoneNumber,
                             _originalRow: rowData
                         }
                         : item
@@ -613,7 +621,15 @@ function Settings() {
                 : 1
             const nextRowIndex = lastUserRowIndex + 1
 
-            const rowData = [newEntry.department, newEntry.givenBy, newEntry.doerName, newEntry.password, newEntry.role]
+            const rowData = [
+                newEntry.department, 
+                newEntry.givenBy, 
+                newEntry.doerName, 
+                newEntry.password, 
+                newEntry.role,
+                '', // Col F (index 5)
+                newEntry.phoneNumber // Col G (index 6)
+            ]
 
             const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
                 method: 'POST',
@@ -630,7 +646,7 @@ function Settings() {
             const result = await response.json()
 
             if (result.success) {
-                setNewEntry({ department: '', givenBy: '', doerName: '', password: '', role: '' })
+                setNewEntry({ department: '', givenBy: '', doerName: '', password: '', role: '', phoneNumber: '' })
                 setShowAddModal(false)
                 setSuccessMessage('New user added successfully!')
                 setTimeout(() => setSuccessMessage(''), 3000)
@@ -932,6 +948,7 @@ function Settings() {
                                             <th className="px-6 py-4 text-left text-xs font-bold text-purple-700 uppercase tracking-widest border-b border-purple-200">Given By</th>
                                             <th className="px-6 py-4 text-left text-xs font-bold text-purple-700 uppercase tracking-widest border-b border-purple-200">Doer's Name</th>
                                             <th className="px-6 py-4 text-left text-xs font-bold text-purple-700 uppercase tracking-widest border-b border-purple-200">password</th>
+                                            <th className="px-6 py-4 text-left text-xs font-bold text-purple-700 uppercase tracking-widest border-b border-purple-200">Phone No.</th>
                                             <th className="px-6 py-4 text-left text-xs font-bold text-purple-700 uppercase tracking-widest border-b border-purple-200">Role</th>
                                             <th className="px-6 py-4 text-center text-xs font-bold text-purple-700 uppercase tracking-widest border-b border-purple-200">Actions</th>
                                         </tr>
@@ -967,6 +984,19 @@ function Settings() {
                                                             />
                                                         ) : (
                                                             <div className="text-sm text-gray-900 font-mono tracking-wider">{row.password}</div>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        {editingId === row.id ? (
+                                                            <input
+                                                                type="text"
+                                                                value={editedValues.phoneNumber}
+                                                                onChange={(e) => setEditedValues(prev => ({ ...prev, phoneNumber: e.target.value }))}
+                                                                className="w-full px-3 py-1.5 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm shadow-inner"
+                                                                placeholder="Phone No."
+                                                            />
+                                                        ) : (
+                                                            <div className="text-sm text-gray-900">{row.phoneNumber || '-'}</div>
                                                         )}
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap">
@@ -1335,18 +1365,30 @@ function Settings() {
                                     </div>
                                 </div>
 
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-bold text-purple-600 uppercase ml-1">Role</label>
-                                    <select
-                                        value={newEntry.role}
-                                        onChange={(e) => setNewEntry(prev => ({ ...prev, role: e.target.value }))}
-                                        className="w-full px-4 py-3 border border-purple-100 rounded-2xl focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm bg-purple-50/30 appearance-none transition-all"
-                                    >
-                                        <option value="">Select Role</option>
-                                        <option value="user">user</option>
-                                        <option value="admin">admin</option>
-                                        <option value="super_admin">super_admin</option>
-                                    </select>
+                                <div className="grid grid-cols-2 gap-5">
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-bold text-purple-600 uppercase ml-1">Phone No.</label>
+                                        <input
+                                            type="text"
+                                            value={newEntry.phoneNumber}
+                                            onChange={(e) => setNewEntry(prev => ({ ...prev, phoneNumber: e.target.value }))}
+                                            placeholder="Enter phone number"
+                                            className="w-full px-4 py-3 border border-purple-100 rounded-2xl focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm bg-purple-50/30 transition-all"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-bold text-purple-600 uppercase ml-1">Role</label>
+                                        <select
+                                            value={newEntry.role}
+                                            onChange={(e) => setNewEntry(prev => ({ ...prev, role: e.target.value }))}
+                                            className="w-full px-4 py-3 border border-purple-100 rounded-2xl focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm bg-purple-50/30 appearance-none transition-all"
+                                        >
+                                            <option value="">Select Role</option>
+                                            <option value="user">user</option>
+                                            <option value="admin">admin</option>
+                                            <option value="super_admin">super_admin</option>
+                                        </select>
+                                    </div>
                                 </div>
 
                                 <div className="pt-4 flex gap-4">
