@@ -351,6 +351,54 @@ export default function QuickTask() {
     }
   };
 
+  const handleDeleteSelected = async () => {
+    if (selectedRows.size === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedRows.size} selected task(s)?`)) {
+      return;
+    }
+
+    try {
+      setDeleting('bulk');
+      const userAppScriptUrl = CONFIG.APPS_SCRIPT_URL;
+      const isChecklist = activeTab === 'checklist';
+      const sheetName = isChecklist ? CONFIG.CHECKLIST_SHEET : CONFIG.DELEGATION_SHEET;
+      const currentTasks = isChecklist ? tasks : delegationTasks;
+
+      for (const taskId of selectedRows) {
+        const task = currentTasks.find(t => t._id === taskId);
+        if (task && task._rowIndex) {
+          const response = await fetch(userAppScriptUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              action: 'deleteRow',
+              sheet: sheetName,
+              rowIndex: String(task._rowIndex)
+            })
+          });
+
+          if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+          const result = await response.json();
+          if (!result.success) throw new Error(result.error || 'Server returned error');
+        }
+      }
+
+      if (isChecklist) {
+        await fetchChecklistData();
+      } else {
+        await fetchDelegationData();
+      }
+      setSelectedRows(new Set());
+      setEditingRows(new Set());
+      alert(`Successfully deleted ${selectedRows.size} task(s)!`);
+    } catch (error) {
+      console.error('Bulk delete error:', error);
+      alert(`Error deleting tasks: ${error.message}`);
+    } finally {
+      setDeleting(null);
+    }
+  };
+
   // Auto-detect current user from login session and get role from Whatsapp sheet
   const fetchCurrentUser = useCallback(async () => {
     try {
@@ -941,12 +989,19 @@ export default function QuickTask() {
 
         {/* Action Buttons for Selected Rows */}
         {selectedRows.size > 0 && isAdmin && (
-          <div className="mb-4 flex justify-end p-4 bg-blue-50 border-b">
+          <div className="mb-4 flex justify-end p-4 bg-blue-50 border-b gap-3">
+            <button
+              onClick={handleDeleteSelected}
+              disabled={deleting === 'bulk' || submitting}
+              className="bg-red-500 hover:bg-red-600 disabled:bg-red-300 text-white px-4 py-2 rounded-md font-medium flex items-center gap-2"
+            >
+              {deleting === 'bulk' ? 'Deleting...' : `Delete ${selectedRows.size} Selected`}
+            </button>
             <button
               onClick={() => {
                 alert('Bulk update functionality coming soon or use individual save buttons.');
               }}
-              disabled={submitting}
+              disabled={submitting || deleting === 'bulk'}
               className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-md font-medium flex items-center gap-2"
             >
               {submitting ? 'Processing...' : `Action on ${selectedRows.size} Selected`}
@@ -1039,28 +1094,12 @@ export default function QuickTask() {
                                 <button
                                   onClick={() => handleUpdateRow(task._id)}
                                   disabled={submitting}
-                                  className="p-1 text-green-600 hover:text-green-800 hover:bg-green-50 rounded transition-colors"
-                                  title="Update Task"
+                                  className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition-colors"
+                                  title="Submit Task"
                                 >
-                                  {submitting ? (
-                                    <div className="h-4 w-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
-                                  ) : (
-                                    <Save className="h-4 w-4" />
-                                  )}
+                                  {submitting ? 'Submitting...' : 'Submit'}
                                 </button>
                               )}
-                              <button
-                                onClick={() => handleDeleteTask(task)}
-                                disabled={deleting === task._id}
-                                className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
-                                title="Delete Task"
-                              >
-                                {deleting === task._id ? (
-                                  <div className="h-4 w-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></div>
-                                ) : (
-                                  <Trash2 className="h-4 w-4" />
-                                )}
-                              </button>
                             </div>
                           </div>
                         </td>
