@@ -1385,7 +1385,7 @@ function Settings() {
                                             <option value="">Select Role</option>
                                             <option value="user">user</option>
                                             <option value="admin">admin</option>
-                                            {/* <option value="super_admin">super_admin</option> */}
+                                            
                                         </select>
                                     </div>
                                 </div>
