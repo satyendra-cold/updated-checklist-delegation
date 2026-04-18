@@ -142,7 +142,7 @@ function Settings() {
                     const password = rowValues[3] || ""
                     const role = rowValues[4] || ""
                     const phoneNumber = (rowValues.length > 6 ? rowValues[6] : "") || ""
-                    
+
                     if (doerName || password || department || givenBy) {
                         return {
                             id: index,
@@ -526,7 +526,7 @@ function Settings() {
             rowData[2] = editedValues.doerName
             rowData[3] = editedValues.password
             rowData[4] = editedValues.role
-            
+
             // Col G is index 6 - Use zero-width space to force text format in Google Sheets
             while (rowData.length <= 6) rowData.push("")
             rowData[6] = editedValues.phoneNumber ? `\u200B${editedValues.phoneNumber}` : ""
@@ -622,10 +622,10 @@ function Settings() {
             const nextRowIndex = lastUserRowIndex + 1
 
             const rowData = [
-                newEntry.department, 
-                newEntry.givenBy, 
-                newEntry.doerName, 
-                newEntry.password, 
+                newEntry.department,
+                newEntry.givenBy,
+                newEntry.doerName,
+                newEntry.password,
                 newEntry.role,
                 '', // Col F (index 5)
                 newEntry.phoneNumber ? `\u200B${newEntry.phoneNumber}` : "" // Col G (index 6) - Zero-width space
@@ -1385,7 +1385,7 @@ function Settings() {
                                             <option value="">Select Role</option>
                                             <option value="user">user</option>
                                             <option value="admin">admin</option>
-                                            <option value="super_admin">super_admin</option>
+                                            {/* <option value="super_admin">super_admin</option> */}
                                         </select>
                                     </div>
                                 </div>
